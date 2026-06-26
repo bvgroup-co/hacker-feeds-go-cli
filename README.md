@@ -6,11 +6,41 @@ A Go rewrite of [`Mayandev/hacker-feeds-cli`](https://github.com/Mayandev/hacker
 
 ## Install
 
+### Homebrew
+
+```sh
+brew tap bvgroup-co/tap
+brew install hfeeds
+```
+
+Verify the installed binary:
+
+```sh
+hfeeds --version
+```
+
+Homebrew releases are published through the `bvgroup-co/homebrew-tap` repository. Release automation requires the repository secret `HOMEBREW_TAP_TOKEN` with permission to push Homebrew cask updates to that tap.
+
+### Go install
+
 ```sh
 go install github.com/bvgroup-co/hacker-feeds-go-cli/cmd/hfeeds@latest
 ```
 
-Build locally:
+### GitHub release archives
+
+Download a prebuilt archive from the GitHub Releases page for your platform:
+
+| Platform | Archive suffix |
+| --- | --- |
+| macOS Intel | `darwin_amd64` |
+| macOS Apple Silicon | `darwin_arm64` |
+| Linux x86_64 | `linux_amd64` |
+| Linux ARM64 | `linux_arm64` |
+
+Each release includes `checksums.txt` for SHA256 verification. Extract the matching archive and place the `hfeeds` binary on your `PATH`.
+
+### Local build
 
 ```sh
 go build -o hfeeds ./cmd/hfeeds
@@ -89,6 +119,27 @@ HFEEDS_V2EX_BASE_URL=http://127.0.0.1:8084
 
 Set `NO_COLOR=1` in scripts/tests to keep output plain.
 
+## Releases
+
+Release automation runs when a semantic version tag is pushed:
+
+```sh
+git tag v0.4.4
+git push origin v0.4.4
+```
+
+The first release after this change should be `v0.4.4`. Release builds inject the tag version with Go ldflags, so the `v0.4.4` binary reports `0.4.4` from `hfeeds --version`. Local development builds report `dev`.
+
+The release workflow uses GoReleaser to build and publish:
+
+- `hfeeds_<version>_linux_amd64.tar.gz`
+- `hfeeds_<version>_linux_arm64.tar.gz`
+- `hfeeds_<version>_darwin_amd64.tar.gz`
+- `hfeeds_<version>_darwin_arm64.tar.gz`
+- `checksums.txt`
+
+Homebrew cask updates are committed to `bvgroup-co/homebrew-tap`. Configure the `HOMEBREW_TAP_TOKEN` repository secret before cutting a release; the token must be able to push to the tap repository.
+
 ## Development
 
 Run tests:
@@ -102,4 +153,10 @@ Format and vet:
 ```sh
 gofmt -w .
 CGO_ENABLED=0 go vet ./...
+```
+
+Check the release configuration locally:
+
+```sh
+goreleaser check
 ```

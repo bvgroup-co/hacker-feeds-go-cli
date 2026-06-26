@@ -13,7 +13,7 @@ import (
 	"github.com/bvgroup-co/hacker-feeds-go-cli/internal/output"
 )
 
-const Version = "0.4.3"
+var Version = "dev"
 
 type App struct {
 	Out        io.Writer
