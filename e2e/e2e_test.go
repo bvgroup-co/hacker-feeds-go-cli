@@ -339,6 +339,10 @@ func TestErrorAndEmptyE2E(t *testing.T) {
 	}
 
 	redditServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/r/popular/top.rss" {
+			_, _ = writer.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><entry><category term="popular"/><content type="html">&lt;p&gt;Fallback text&lt;/p&gt;</content><link href="https://www.reddit.com/r/popular/comments/1/post/"/><title>RSS Fallback</title></entry></feed>`))
+			return
+		}
 		switch request.URL.Path {
 		case "/r/popular/hot.json":
 			_, _ = writer.Write([]byte(`{"data":{"children":[]}}`))
@@ -354,8 +358,17 @@ func TestErrorAndEmptyE2E(t *testing.T) {
 		t.Fatalf("reddit empty = %#v", result)
 	}
 	result = run(t, []string{"reddit", "-s", "top"}, []string{"HFEEDS_REDDIT_BASE_URL=" + redditServer.URL})
-	if result.code == 0 {
-		t.Fatalf("reddit 429 = %#v", result)
+	if result.code != 0 || !strings.Contains(result.stdout, "RSS Fallback") {
+		t.Fatalf("reddit fallback = %#v", result)
+	}
+
+	redditBlockedServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		http.Error(writer, "blocked", http.StatusForbidden)
+	}))
+	defer redditBlockedServer.Close()
+	result = run(t, []string{"reddit"}, []string{"HFEEDS_REDDIT_BASE_URL=" + redditBlockedServer.URL})
+	if result.code == 0 || !strings.Contains(result.stderr, "Reddit may be blocking this network") || strings.TrimSpace(result.stderr) == "request failed with status 403" {
+		t.Fatalf("reddit blocked = %#v", result)
 	}
 
 	v2exServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {

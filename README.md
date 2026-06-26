@@ -107,6 +107,18 @@ Product Hunt requires an access token:
 export PRODUCT_HUNT_ACCESS_TOKEN=your-token
 ```
 
+### Reddit access
+
+The Reddit command first requests Reddit's JSON listing endpoint, then falls back to Reddit's Atom/RSS feed when JSON is rejected with `403 Forbidden` or `429 Too Many Requests`. RSS fallback preserves title, link, topic, and text content; comment and vote counts are not available from the feed and are shown as `0`.
+
+Reddit may block unauthenticated traffic from some networks. If both JSON and RSS are rejected, `hfeeds reddit` prints a Reddit-specific actionable error instead of a generic HTTP status. You can provide a descriptive Reddit user agent if your environment requires one:
+
+```sh
+export HFEEDS_REDDIT_USER_AGENT='hfeeds/0.4.4 by your-reddit-username'
+```
+
+If Reddit still blocks the command, retry later or from another network. The CLI does not currently require or store Reddit OAuth credentials.
+
 The HTTP base URLs can be overridden for tests:
 
 ```sh
