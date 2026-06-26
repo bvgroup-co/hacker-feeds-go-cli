@@ -4,9 +4,13 @@ package app
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/bvgroup-co/hacker-feeds-go-cli/internal/feeds"
 )
 
 func TestSelectLanguageRequiresTTY(t *testing.T) {
@@ -56,5 +60,59 @@ func TestIsTerminalDetectsRegularFile(t *testing.T) {
 	defer file.Close()
 	if isTerminal(file) {
 		t.Fatal("regular file reported as terminal")
+	}
+}
+
+func TestHelpCommands(t *testing.T) {
+	commands := [][]string{
+		{"--help"},
+		{"-h"},
+		{"help"},
+		{"help", "news"},
+		{"help", "reddit"},
+		{"config", "--help"},
+		{"github", "--help"},
+		{"news", "--help"},
+		{"news", "-h"},
+		{"news", "help"},
+		{"product", "--help"},
+		{"reddit", "--help"},
+		{"v2ex", "--help"},
+		{"news", "discussion", "--help"},
+		{"news", "comments", "--help"},
+		{"help", "news", "discussion"},
+		{"reddit", "comments", "--help"},
+		{"help", "reddit", "comments"},
+	}
+	for _, command := range commands {
+		t.Run(strings.Join(command, " "), func(t *testing.T) {
+			var out bytes.Buffer
+			var stderr bytes.Buffer
+			code := (App{Out: &out, Err: &stderr, Stdin: nil}).Run(command)
+			if code != 0 || !strings.Contains(out.String(), "Usage:") || stderr.Len() != 0 {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
+			}
+		})
+	}
+}
+
+func TestNewsCommentsAlias(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/item/1.json":
+			_, _ = writer.Write([]byte(`{"id":1,"type":"story","by":"alice","title":"Story","score":1,"descendants":1,"kids":[2]}`))
+		case "/item/2.json":
+			_, _ = writer.Write([]byte(`{"id":2,"type":"comment","by":"bob","parent":1,"text":"Alias works"}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	client := feeds.Client{HTTP: server.Client(), NewsBase: server.URL}
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	code := (App{Out: &out, Err: &stderr, Client: &client, Stdin: nil}).Run([]string{"news", "comments", "-i", "1", "-c", "1", "-d", "1"})
+	if code != 0 || !strings.Contains(out.String(), "Hacker News Discussion") || !strings.Contains(out.String(), "Alias works") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
 	}
 }

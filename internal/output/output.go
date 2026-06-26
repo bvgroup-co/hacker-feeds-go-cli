@@ -25,9 +25,45 @@ func News(writer io.Writer, labels i18n.Labels, items []feeds.NewsItem) {
 	header(writer, labels.News.Header)
 	for _, item := range items {
 		fmt.Fprintf(writer, "%s: %s\n", labels.News.Title, item.Title)
+		fmt.Fprintf(writer, "ID: %d | Author: %s | Score: %d | Comments: %d\n", item.ID, item.Author, item.Score, item.Descendants)
 		if item.URL != "" {
 			fmt.Fprintf(writer, "%s: %s\n", labels.News.URL, item.URL)
 		}
+		separator(writer)
+	}
+}
+
+func NewsDiscussion(writer io.Writer, labels i18n.Labels, discussion feeds.NewsDiscussion) {
+	header(writer, labels.News.DiscussionHeader)
+	item := discussion.Item
+	fmt.Fprintf(writer, "ID: %d | %s: %s | Author: %s | Score: %d | Comments: %d\n", item.ID, labels.News.Title, item.Title, item.Author, item.Score, item.Descendants)
+	if item.URL != "" {
+		fmt.Fprintf(writer, "%s: %s\n", labels.News.URL, item.URL)
+	}
+	separator(writer)
+	for _, comment := range discussion.Comments {
+		writeNewsComment(writer, comment)
+	}
+}
+
+func writeNewsComment(writer io.Writer, comment feeds.NewsComment) {
+	indent := ""
+	for range comment.Depth {
+		indent += "  "
+	}
+	fmt.Fprintf(writer, "%sAuthor: %s | ID: %d\n", indent, comment.Author, comment.ID)
+	text := comment.Text
+	if comment.Deleted {
+		text = "[deleted]"
+	}
+	if comment.Dead {
+		text = "[dead]"
+	}
+	fmt.Fprintf(writer, "%sComment: %s\n", indent, text)
+	for _, child := range comment.Children {
+		writeNewsComment(writer, child)
+	}
+	if comment.Depth == 0 {
 		separator(writer)
 	}
 }

@@ -46,3 +46,7 @@ func parseStringFlags(args []string, defaults map[string]string, specs ...flagSp
 	}
 	return values, nil
 }
+
+func wantsHelp(args []string) bool {
+	return len(args) > 0 && (args[0] == "--help" || args[0] == "-h" || args[0] == "help")
+}

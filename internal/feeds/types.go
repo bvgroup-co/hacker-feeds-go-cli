@@ -25,8 +25,30 @@ type GitHubRepo struct {
 }
 
 type NewsItem struct {
-	Title string `json:"title"`
-	URL   string `json:"url"`
+	ID          int
+	Title       string
+	URL         string
+	Author      string
+	Score       int
+	Descendants int
+}
+
+type NewsDiscussion struct {
+	Item     NewsItem
+	Comments []NewsComment
+}
+
+type NewsComment struct {
+	ID       int
+	ParentID int
+	Author   string
+	TextHTML string
+	Text     string
+	Deleted  bool
+	Dead     bool
+	Time     int64
+	Depth    int
+	Children []NewsComment
 }
 
 type Product struct {

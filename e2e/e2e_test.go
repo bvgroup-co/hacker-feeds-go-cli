@@ -123,17 +123,32 @@ func TestNewsE2E(t *testing.T) {
 			http.Error(writer, "no", http.StatusInternalServerError)
 			return
 		}
-		if strings.HasPrefix(request.URL.Path, "/item/") {
-			id := strings.TrimSuffix(strings.TrimPrefix(request.URL.Path, "/item/"), ".json")
-			_, _ = writer.Write([]byte(`{"title":"News ` + id + `","url":"https://news.example/` + id + `"}`))
+		switch request.URL.Path {
+		case "/item/1.json":
+			_, _ = writer.Write([]byte(`{"id":1,"type":"story","by":"alice","title":"News 1","url":"https://news.example/1","score":42,"descendants":2,"kids":[12,13]}`))
 			return
+		case "/item/12.json":
+			_, _ = writer.Write([]byte(`{"id":12,"type":"comment","by":"bob","parent":1,"text":"First &amp; comment","kids":[14]}`))
+			return
+		case "/item/13.json":
+			_, _ = writer.Write([]byte(`{"id":13,"type":"comment","deleted":true,"parent":1}`))
+			return
+		case "/item/14.json":
+			_, _ = writer.Write([]byte(`{"id":14,"type":"comment","by":"carol","parent":12,"text":"Nested reply"}`))
+			return
+		default:
+			if strings.HasPrefix(request.URL.Path, "/item/") {
+				id := strings.TrimSuffix(strings.TrimPrefix(request.URL.Path, "/item/"), ".json")
+				_, _ = writer.Write([]byte(`{"id":` + id + `,"title":"News ` + id + `","url":"https://news.example/` + id + `","by":"user` + id + `","score":` + id + `,"descendants":0}`))
+				return
+			}
 		}
 		http.NotFound(writer, request)
 	}))
 	defer server.Close()
 
 	result := run(t, []string{"news", "--top", "1"}, []string{"HFEEDS_HN_BASE_URL=" + server.URL})
-	if result.code != 0 || !strings.Contains(result.stdout, "Hacker News List") || strings.Count(result.stdout, "Title:") != 1 {
+	if result.code != 0 || !strings.Contains(result.stdout, "Hacker News List") || strings.Count(result.stdout, "Title:") != 1 || !strings.Contains(result.stdout, "ID: 1 | Author: alice | Score: 42 | Comments: 2") {
 		t.Fatalf("top 1 = %#v", result)
 	}
 	result = run(t, []string{"news", "-t", "2"}, []string{"HFEEDS_HN_BASE_URL=" + server.URL})
@@ -143,6 +158,14 @@ func TestNewsE2E(t *testing.T) {
 	result = run(t, []string{"news", "-t", "0"}, []string{"HFEEDS_HN_BASE_URL=" + server.URL})
 	if result.code == 0 {
 		t.Fatalf("invalid = %#v", result)
+	}
+	result = run(t, []string{"news", "discussion", "--id", "1", "--limit", "10", "--depth", "2"}, []string{"HFEEDS_HN_BASE_URL=" + server.URL})
+	if result.code != 0 || !strings.Contains(result.stdout, "Hacker News Discussion") || !strings.Contains(result.stdout, "Comment: First & comment") || !strings.Contains(result.stdout, "  Author: carol | ID: 14") || !strings.Contains(result.stdout, "[deleted]") {
+		t.Fatalf("discussion = %#v", result)
+	}
+	result = run(t, []string{"news", "comments", "-i", "1", "-c", "1", "-d", "1"}, []string{"HFEEDS_HN_BASE_URL=" + server.URL})
+	if result.code != 0 || !strings.Contains(result.stdout, "Comment: First & comment") || strings.Contains(result.stdout, "Nested reply") || strings.Contains(result.stdout, "[deleted]") {
+		t.Fatalf("comments alias = %#v", result)
 	}
 	home := writeLang(t, "zh")
 	result = run(t, []string{"news", "--top", "1"}, []string{"HOME=" + home, "HFEEDS_HN_BASE_URL=" + server.URL})

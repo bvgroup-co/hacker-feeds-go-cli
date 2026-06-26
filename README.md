@@ -66,6 +66,8 @@ Commands:
 hfeeds config --lang en|zh
 hfeeds github [-s daily|weekly|monthly] [-l language]
 hfeeds news [-t top]
+hfeeds news discussion --id item_id [--limit n] [--depth n]
+hfeeds news comments --id item_id [--limit n] [--depth n]
 hfeeds product [-c count] [-p past]
 hfeeds reddit [-t topic] [-c limit]
 hfeeds reddit comments --topic topic --post post_id [--limit n] [--depth n]
@@ -78,6 +80,8 @@ Examples:
 hfeeds github
 hfeeds github --since weekly --lang go
 hfeeds news --top 5
+hfeeds news discussion --id 123456 --limit 20 --depth 3
+hfeeds news comments --id 123456 --limit 20 --depth 3
 hfeeds product --count 5 --past 1
 hfeeds reddit --topic golang
 hfeeds reddit comments --topic golang --post abc123 --limit 10 --depth 2
@@ -108,6 +112,14 @@ Product Hunt requires an access token:
 ```sh
 export PRODUCT_HUNT_ACCESS_TOKEN=your-token
 ```
+
+### Hacker News access
+
+Hacker News uses the public Firebase API and does not require credentials. The default base URL is `https://hacker-news.firebaseio.com/v0`, and it can be overridden with `HFEEDS_HN_BASE_URL` for tests or local fixtures.
+
+`hfeeds news --top 5` fetches `/topstories.json`, loads each story from `/item/{id}.json`, and prints HN item IDs with author, score, and comment count so the IDs can be used for discussion lookup.
+
+`hfeeds news discussion --id 123456 --limit 20 --depth 3` fetches the root item from `/item/{id}.json` and follows comment `kids` recursively. `--limit` caps total printed comments and `--depth` caps nesting depth. `hfeeds news comments --id 123456 --limit 20 --depth 3` is an alias for the same discussion retrieval.
 
 ### Reddit access
 

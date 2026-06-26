@@ -24,9 +24,10 @@ type GitHubLabels struct {
 }
 
 type NewsLabels struct {
-	Header string
-	Title  string
-	URL    string
+	Header           string
+	DiscussionHeader string
+	Title            string
+	URL              string
 }
 
 type ProductLabels struct {
@@ -97,9 +98,10 @@ var en = Labels{
 		StarsThisMonth: "Stars this month",
 	},
 	News: NewsLabels{
-		Header: "Hacker News List",
-		Title:  "Title",
-		URL:    "URL",
+		Header:           "Hacker News List",
+		DiscussionHeader: "Hacker News Discussion",
+		Title:            "Title",
+		URL:              "URL",
 	},
 	Product: ProductLabels{
 		Header:      "Product Hunt List",
@@ -152,9 +154,10 @@ var zh = Labels{
 		StarsThisMonth: "本月新增星标",
 	},
 	News: NewsLabels{
-		Header: "Hacker News 新闻",
-		Title:  "标题",
-		URL:    "链接",
+		Header:           "Hacker News 新闻",
+		DiscussionHeader: "Hacker News 讨论",
+		Title:            "标题",
+		URL:              "链接",
 	},
 	Product: ProductLabels{
 		Header:      "Product Hunt 榜单",
