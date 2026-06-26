@@ -160,8 +160,13 @@ func TestProductRedditV2EXE2E(t *testing.T) {
 	}))
 	defer productServer.Close()
 	result := run(t, []string{"product", "-c", "2", "-p", "1"}, []string{"HFEEDS_PRODUCT_HUNT_BASE_URL=" + productServer.URL, "PRODUCT_HUNT_ACCESS_TOKEN=token"})
-	if result.code != 0 || !strings.Contains(result.stdout, "Product Hunt List") || strings.Contains(result.stdout, "?ref=x") {
+	if result.code != 0 || !strings.Contains(result.stdout, "Product Hunt List") || !strings.Contains(result.stdout, "Votes: 5") || strings.Contains(result.stdout, "?ref=x") {
 		t.Fatalf("product = %#v", result)
+	}
+	home := writeLang(t, "zh")
+	result = run(t, []string{"product"}, []string{"HOME=" + home, "HFEEDS_PRODUCT_HUNT_BASE_URL=" + productServer.URL, "PRODUCT_HUNT_ACCESS_TOKEN=token"})
+	if result.code != 0 || !strings.Contains(result.stdout, "Product Hunt 榜单") || !strings.Contains(result.stdout, "投票: 5") {
+		t.Fatalf("product zh = %#v", result)
 	}
 	result = run(t, []string{"product"}, []string{"HFEEDS_PRODUCT_HUNT_BASE_URL=" + productServer.URL})
 	if result.code == 0 || !strings.Contains(result.stderr, "PRODUCT_HUNT_ACCESS_TOKEN") {
@@ -182,6 +187,11 @@ func TestProductRedditV2EXE2E(t *testing.T) {
 			t.Fatalf("reddit %v = %#v", args, result)
 		}
 	}
+	home = writeLang(t, "zh")
+	result = run(t, []string{"reddit"}, []string{"HOME=" + home, "HFEEDS_REDDIT_BASE_URL=" + redditServer.URL})
+	if result.code != 0 || !strings.Contains(result.stdout, "Reddit 帖子") || !strings.Contains(result.stdout, "投票: 2") || !strings.Contains(result.stdout, "话题: popular") {
+		t.Fatalf("reddit zh = %#v", result)
+	}
 	result = run(t, []string{"reddit", "-s", "bad"}, []string{"HFEEDS_REDDIT_BASE_URL=" + redditServer.URL})
 	if result.code == 0 {
 		t.Fatalf("reddit invalid = %#v", result)
@@ -192,12 +202,17 @@ func TestProductRedditV2EXE2E(t *testing.T) {
 			http.NotFound(writer, request)
 			return
 		}
-		_, _ = writer.Write([]byte(`[{"title":"Topic","content":"","replies":2,"url":"https://v2ex.example/t/1","node":{"name":"` + request.URL.Query().Get("node_name") + `"}}]`))
+		_, _ = writer.Write([]byte(`[{"title":"Topic","content":"","replies":2,"url":"https://v2ex.example/t/1","votes":4,"node":{"name":"` + request.URL.Query().Get("node_name") + `"}}]`))
 	}))
 	defer v2exServer.Close()
 	result = run(t, []string{"v2ex", "-n", "programmer"}, []string{"HFEEDS_V2EX_BASE_URL=" + v2exServer.URL})
-	if result.code != 0 || !strings.Contains(result.stdout, "V2EX Feeds List") || !strings.Contains(result.stdout, "programmer") || strings.Contains(result.stdout, "Content:") {
+	if result.code != 0 || !strings.Contains(result.stdout, "V2EX Feeds List") || !strings.Contains(result.stdout, "Votes: 4") || !strings.Contains(result.stdout, "programmer") || strings.Contains(result.stdout, "Content:") {
 		t.Fatalf("v2ex = %#v", result)
+	}
+	home = writeLang(t, "zh")
+	result = run(t, []string{"v2ex"}, []string{"HOME=" + home, "HFEEDS_V2EX_BASE_URL=" + v2exServer.URL})
+	if result.code != 0 || !strings.Contains(result.stdout, "V2EX 帖子") || !strings.Contains(result.stdout, "Votes: 4") || !strings.Contains(result.stdout, "节点: create") {
+		t.Fatalf("v2ex zh = %#v", result)
 	}
 }
 

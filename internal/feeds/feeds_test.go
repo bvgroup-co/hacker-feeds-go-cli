@@ -110,7 +110,7 @@ func TestFetchV2EX(t *testing.T) {
 		if request.URL.Path != "/api/topics/show.json" || request.URL.Query().Get("node_name") != "programmer" {
 			t.Fatalf("url = %s", request.URL.String())
 		}
-		_, _ = writer.Write([]byte(`[{"title":"Topic","content":"Body","replies":4,"url":"https://v2ex.example/t/1","node":{"name":"programmer"}}]`))
+		_, _ = writer.Write([]byte(`[{"title":"Topic","content":"Body","replies":4,"url":"https://v2ex.example/t/1","votes":6,"node":{"name":"programmer"}}]`))
 	}))
 	defer server.Close()
 
@@ -118,7 +118,7 @@ func TestFetchV2EX(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(topics) != 1 || topics[0].Node != "programmer" {
+	if len(topics) != 1 || topics[0].Node != "programmer" || topics[0].Votes != 6 {
 		t.Fatalf("topics = %#v", topics)
 	}
 }

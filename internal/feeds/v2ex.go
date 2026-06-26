@@ -11,6 +11,7 @@ type v2exTopic struct {
 	Content string `json:"content"`
 	Comment int    `json:"replies"`
 	Link    string `json:"url"`
+	Votes   int    `json:"votes"`
 	Node    struct {
 		Name string `json:"name"`
 	} `json:"node"`
@@ -43,6 +44,7 @@ func (client Client) FetchV2EX(node string) ([]V2EXTopic, error) {
 			Content: item.Content,
 			Comment: item.Comment,
 			Link:    item.Link,
+			Votes:   item.Votes,
 			Node:    item.Node.Name,
 		})
 	}

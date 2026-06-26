@@ -60,7 +60,7 @@ func V2EX(writer io.Writer, labels i18n.Labels, topics []feeds.V2EXTopic) {
 	header(writer, labels.V2EX.Header)
 	for _, topic := range topics {
 		fmt.Fprintf(writer, "%s: %s\n", labels.V2EX.Title, topic.Title)
-		fmt.Fprintf(writer, "%s: %d | %s: %s\n", labels.V2EX.Comment, topic.Comment, labels.V2EX.Topic, topic.Node)
+		fmt.Fprintf(writer, "%s: %d | %s: %d | %s: %s\n", labels.V2EX.Comment, topic.Comment, labels.V2EX.Votes, topic.Votes, labels.V2EX.Topic, topic.Node)
 		fmt.Fprintf(writer, "%s: %s\n", labels.V2EX.Link, topic.Link)
 		if topic.Content != "" {
 			fmt.Fprintf(writer, "%s: %s\n", labels.V2EX.Content, topic.Content)

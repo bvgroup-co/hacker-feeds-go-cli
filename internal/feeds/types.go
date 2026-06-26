@@ -49,6 +49,7 @@ type V2EXTopic struct {
 	Content string
 	Comment int
 	Link    string
+	Votes   int
 	Node    string
 }
 

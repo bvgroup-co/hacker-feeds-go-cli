@@ -16,20 +16,22 @@ import (
 const Version = "0.4.3"
 
 type App struct {
-	Out    io.Writer
-	Err    io.Writer
-	Stdin  *os.File
-	Client feeds.Client
-	Now    func() time.Time
+	Out        io.Writer
+	Err        io.Writer
+	Stdin      *os.File
+	Client     feeds.Client
+	Now        func() time.Time
+	IsTerminal func(*os.File) bool
 }
 
 func New() App {
 	return App{
-		Out:    os.Stdout,
-		Err:    os.Stderr,
-		Stdin:  os.Stdin,
-		Client: feeds.NewClientFromEnv(os.Getenv),
-		Now:    time.Now,
+		Out:        os.Stdout,
+		Err:        os.Stderr,
+		Stdin:      os.Stdin,
+		Client:     feeds.NewClientFromEnv(os.Getenv),
+		Now:        time.Now,
+		IsTerminal: isTerminal,
 	}
 }
 
@@ -88,7 +90,11 @@ func (app App) config(args []string, labels i18n.Labels) error {
 	}
 	lang := flags["--lang"]
 	if lang == "" {
-		return errors.New("non-interactive config requires --lang en|zh")
+		selected, err := app.selectLanguage()
+		if err != nil {
+			return err
+		}
+		lang = selected
 	}
 	if err := config.WriteLang(lang); err != nil {
 		fmt.Fprintln(app.Err, labels.Config.Failed)
@@ -96,6 +102,36 @@ func (app App) config(args []string, labels i18n.Labels) error {
 	}
 	fmt.Fprintln(app.Out, i18n.For(lang).Config.Saved)
 	return nil
+}
+
+func (app App) selectLanguage() (string, error) {
+	if !app.stdinIsTerminal() {
+		return "", fmt.Errorf("non-interactive config requires --lang en|zh")
+	}
+	fmt.Fprintln(app.Out, "Please select a language(Default EN):")
+	fmt.Fprintln(app.Out, "1) EN（English）")
+	fmt.Fprintln(app.Out, "2) ZH（简体中文）")
+	fmt.Fprint(app.Out, "> ")
+	var choice string
+	if _, err := fmt.Fscanln(app.Stdin, &choice); err != nil {
+		return "", err
+	}
+	switch choice {
+	case "", "1", "en", "EN":
+		return "en", nil
+	case "2", "zh", "ZH":
+		return "zh", nil
+	default:
+		return "", fmt.Errorf("language must be en or zh")
+	}
+}
+
+func (app App) stdinIsTerminal() bool {
+	terminal := app.IsTerminal
+	if terminal == nil {
+		terminal = isTerminal
+	}
+	return terminal(app.Stdin)
 }
 
 func (app App) github(args []string, labels i18n.Labels) error {
