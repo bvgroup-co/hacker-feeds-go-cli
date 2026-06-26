@@ -87,75 +87,6 @@ func TestFetchProductsRequiresToken(t *testing.T) {
 	}
 }
 
-func TestFetchReddit(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/r/golang/top.json" {
-			t.Fatalf("path = %s", request.URL.Path)
-		}
-		if request.Header.Get("User-Agent") == "" || request.Header.Get("Accept") != "application/json" {
-			t.Fatalf("headers = %#v", request.Header)
-		}
-		_, _ = writer.Write([]byte(`{"data":{"children":[{"data":{"title":"Post","selftext":"Body","num_comments":3,"permalink":"/r/golang/comments/1/post/","ups":9,"subreddit":"golang"}}]}}`))
-	}))
-	defer server.Close()
-
-	posts, err := (Client{HTTP: server.Client(), RedditBase: server.URL}).FetchReddit("golang", "top")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(posts) != 1 || posts[0].Link != server.URL+"/r/golang/comments/1/post/" {
-		t.Fatalf("posts = %#v", posts)
-	}
-}
-
-func TestFetchRedditFallsBackToRSS(t *testing.T) {
-	var paths []string
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		paths = append(paths, request.URL.Path)
-		switch request.URL.Path {
-		case "/r/golang/top.json":
-			http.Error(writer, "blocked", http.StatusForbidden)
-		case "/r/golang/top.rss":
-			if request.Header.Get("Accept") != "application/atom+xml, application/rss+xml, text/xml" {
-				t.Fatalf("accept = %s", request.Header.Get("Accept"))
-			}
-			_, _ = writer.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><entry><category term="golang" label="r/golang"/><content type="html">&lt;div&gt;Fallback &amp;amp; body&lt;/div&gt;</content><link href="https://www.reddit.com/r/golang/comments/1/post/"/><title>RSS Post</title></entry></feed>`))
-		default:
-			http.NotFound(writer, request)
-		}
-	}))
-	defer server.Close()
-
-	posts, err := (Client{HTTP: server.Client(), RedditBase: server.URL, RedditUserAgent: "test-agent"}).FetchReddit("golang", "top")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Join(paths, ",") != "/r/golang/top.json,/r/golang/top.rss" {
-		t.Fatalf("paths = %#v", paths)
-	}
-	if len(posts) != 1 || posts[0].Title != "RSS Post" || posts[0].Content != "Fallback & body" || posts[0].Topic != "golang" || posts[0].Comment != 0 || posts[0].Votes != 0 {
-		t.Fatalf("posts = %#v", posts)
-	}
-}
-
-func TestFetchRedditFallbackErrorIsActionable(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		http.Error(writer, "blocked", http.StatusTooManyRequests)
-	}))
-	defer server.Close()
-
-	_, err := (Client{HTTP: server.Client(), RedditBase: server.URL}).FetchReddit("popular", "hot")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	message := err.Error()
-	for _, fragment := range []string{"reddit rejected JSON", "RSS fallback failed", "HFEEDS_REDDIT_USER_AGENT", "see README Reddit notes"} {
-		if !strings.Contains(message, fragment) {
-			t.Fatalf("error missing %s: %s", fragment, message)
-		}
-	}
-}
-
 func TestFetchV2EX(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/api/topics/show.json" || request.URL.Query().Get("node_name") != "programmer" {
@@ -182,4 +113,235 @@ func readRequestBody(t *testing.T, request *http.Request) string {
 		t.Fatal(err)
 	}
 	return string(body)
+}
+
+func TestFetchRedditUsesRSSFirst(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		paths = append(paths, request.URL.Path)
+		if request.URL.Path != "/r/golang/.rss" {
+			http.NotFound(writer, request)
+			return
+		}
+		if request.URL.Query().Get("limit") != "2" || !strings.Contains(request.Header.Get("Accept"), "application/atom+xml") || request.Header.Get("User-Agent") == "" {
+			t.Fatalf("request = %s headers=%#v", request.URL.String(), request.Header)
+		}
+		_, _ = writer.Write([]byte(redditRSSFixture()))
+	}))
+	defer server.Close()
+
+	posts, err := (&Client{HTTP: server.Client(), RedditBase: server.URL, ArcticShiftBase: server.URL}).FetchReddit("golang", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(paths, ",") != "/r/golang/.rss" {
+		t.Fatalf("paths = %#v", paths)
+	}
+	if len(posts) != 1 || posts[0].Source != "reddit-rss" || posts[0].ID != "abc123" || posts[0].Title != "Post & Title" || posts[0].Author != "alice" || posts[0].AuthorURI != "https://www.reddit.com/user/alice" || posts[0].Subreddit != "golang" || posts[0].Content != "Body & text" || posts[0].CreatedUTC != 1770004800 || posts[0].UpdatedUTC != 1770004860 {
+		t.Fatalf("posts = %#v", posts)
+	}
+}
+
+func TestFetchRedditFallsBackToArcticShiftPosts(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		paths = append(paths, request.URL.Path)
+		switch request.URL.Path {
+		case "/r/golang/.rss":
+			http.Error(writer, "blocked", http.StatusForbidden)
+		case "/api/posts/search":
+			if request.URL.Query().Get("subreddit") != "golang" || request.URL.Query().Get("limit") != "3" || request.URL.Query().Get("sort") != "desc" || request.URL.Query().Get("sort_type") != "created_utc" {
+				t.Fatalf("query = %s", request.URL.RawQuery)
+			}
+			_, _ = writer.Write([]byte(`{"data":[{"id":"def456","name":"t3_def456","title":"Fallback","selftext":"Self text","url":"https://example.com","permalink":"/r/golang/comments/def456/fallback/","subreddit":"golang","author":"bob","score":12,"ups":10,"num_comments":4,"created_utc":1770000100,"is_self":false,"domain":"example.com"}]}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	posts, err := (&Client{HTTP: server.Client(), RedditBase: server.URL, ArcticShiftBase: server.URL}).FetchReddit("golang", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(paths, ",") != "/r/golang/.rss,/api/posts/search" {
+		t.Fatalf("paths = %#v", paths)
+	}
+	if len(posts) != 1 || posts[0].Source != "arctic-shift" || posts[0].ID != "def456" || posts[0].Score != 12 || posts[0].NumComments != 4 || posts[0].Permalink != "https://www.reddit.com/r/golang/comments/def456/fallback/" {
+		t.Fatalf("posts = %#v", posts)
+	}
+}
+
+func TestFetchRedditFallsBackOnInvalidRSS(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/r/golang/.rss":
+			_, _ = writer.Write([]byte(`not xml`))
+		case "/api/posts/search":
+			_, _ = writer.Write([]byte(`{"data":[]}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	posts, err := (&Client{HTTP: server.Client(), RedditBase: server.URL, ArcticShiftBase: server.URL}).FetchReddit("golang", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(posts) != 0 {
+		t.Fatalf("posts = %#v", posts)
+	}
+}
+
+func TestFetchRedditCommentsUsesShredditFirst(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		paths = append(paths, request.URL.Path)
+		if request.URL.Path != "/svc/shreddit/comments/r/golang/t3_abc123" {
+			http.NotFound(writer, request)
+			return
+		}
+		if request.URL.Query().Get("limit") != "10" || request.URL.Query().Get("depth") != "2" || !strings.Contains(request.Header.Get("Accept"), "text/html") {
+			t.Fatalf("request = %s headers=%#v", request.URL.String(), request.Header)
+		}
+		_, _ = writer.Write([]byte(shredditFixture()))
+	}))
+	defer server.Close()
+
+	discussion, err := (&Client{HTTP: server.Client(), RedditBase: server.URL, ArcticShiftBase: server.URL}).FetchRedditComments("golang", "abc123", 10, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(paths, ",") != "/svc/shreddit/comments/r/golang/t3_abc123" {
+		t.Fatalf("paths = %#v", paths)
+	}
+	if discussion.Post.Source != "reddit-shreddit" || len(discussion.Comments) != 1 {
+		t.Fatalf("discussion = %#v", discussion)
+	}
+	root := discussion.Comments[0]
+	if root.ID != "c1" || root.Name != "t1_c1" || root.Author != "alice" || root.Body != "Root & body" || root.Score != 7 || root.Depth != 0 || root.CreatedUTC != 1770005000 || len(root.Replies) != 1 {
+		t.Fatalf("root = %#v", root)
+	}
+	if root.Replies[0].ID != "c2" || root.Replies[0].ParentID != "t1_c1" || root.Replies[0].Body != "Reply body" || root.Replies[0].Depth != 1 {
+		t.Fatalf("reply = %#v", root.Replies[0])
+	}
+}
+
+func TestFetchRedditCommentsFallsBackToArcticShift(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		paths = append(paths, request.URL.Path)
+		switch request.URL.Path {
+		case "/svc/shreddit/comments/r/golang/t3_abc123":
+			_, _ = writer.Write([]byte(`<html><title>verification required</title></html>`))
+		case "/api/comments/search":
+			if request.URL.Query().Get("link_id") != "t3_abc123" || request.URL.Query().Get("limit") != "10" {
+				t.Fatalf("query = %s", request.URL.RawQuery)
+			}
+			_, _ = writer.Write([]byte(arcticCommentsFixture()))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	discussion, err := (&Client{HTTP: server.Client(), RedditBase: server.URL, ArcticShiftBase: server.URL}).FetchRedditComments("golang", "abc123", 10, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(paths, ",") != "/svc/shreddit/comments/r/golang/t3_abc123,/api/comments/search" {
+		t.Fatalf("paths = %#v", paths)
+	}
+	if discussion.Post.Source != "arctic-shift" || len(discussion.Comments) != 1 || len(discussion.Comments[0].Replies) != 1 {
+		t.Fatalf("discussion = %#v", discussion)
+	}
+	if discussion.Comments[0].Source != "arctic-shift" || discussion.Comments[0].Replies[0].ParentID != "t1_c1" {
+		t.Fatalf("comments = %#v", discussion.Comments)
+	}
+}
+
+func TestBuildRedditCommentTreePreservesMultipleLevels(t *testing.T) {
+	comments := buildRedditCommentTree([]RedditComment{
+		{ID: "c1", Name: "t1_c1", ParentID: "t3_abc", Body: "root", CreatedUTC: 1},
+		{ID: "c2", Name: "t1_c2", ParentID: "t1_c1", Body: "child", CreatedUTC: 2},
+		{ID: "c3", Name: "t1_c3", ParentID: "t1_c2", Body: "grandchild", CreatedUTC: 3},
+		{ID: "c4", Name: "t1_c4", ParentID: "t1_c3", Body: "great-grandchild", CreatedUTC: 4},
+	})
+	if len(comments) != 1 || len(comments[0].Replies) != 1 || len(comments[0].Replies[0].Replies) != 1 || len(comments[0].Replies[0].Replies[0].Replies) != 1 {
+		t.Fatalf("comments = %#v", comments)
+	}
+	leaf := comments[0].Replies[0].Replies[0].Replies[0]
+	if leaf.ID != "c4" || leaf.Body != "great-grandchild" {
+		t.Fatalf("leaf = %#v", leaf)
+	}
+}
+
+func TestFetchRedditNoOAuthOrJSON(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		paths = append(paths, request.URL.Path)
+		if strings.Contains(request.URL.Path, "access_token") || strings.HasSuffix(request.URL.Path, ".json") || request.Header.Get("Authorization") != "" {
+			t.Fatalf("unexpected oauth/json request path=%s headers=%#v", request.URL.Path, request.Header)
+		}
+		switch request.URL.Path {
+		case "/r/golang/.rss":
+			_, _ = writer.Write([]byte(redditRSSFixture()))
+		case "/svc/shreddit/comments/r/golang/t3_abc123":
+			_, _ = writer.Write([]byte(shredditFixture()))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	client := &Client{HTTP: server.Client(), RedditBase: server.URL, ArcticShiftBase: server.URL}
+	if _, err := client.FetchReddit("golang", 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.FetchRedditComments("golang", "abc123", 10, 2); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(paths, ",") != "/r/golang/.rss,/svc/shreddit/comments/r/golang/t3_abc123" {
+		t.Fatalf("paths = %#v", paths)
+	}
+}
+
+func TestFetchRedditAllSourcesUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Retry-After", "30")
+		http.Error(writer, "blocked html body that should be short", http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	_, err := (&Client{HTTP: server.Client(), RedditBase: server.URL, ArcticShiftBase: server.URL}).FetchReddit("golang", 1)
+	if err == nil || !strings.Contains(err.Error(), "Reddit source unavailable without OAuth") || !strings.Contains(err.Error(), "retry after 30") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func redditRSSFixture() string {
+	return `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>/r/golang</title>
+  <category term="golang"></category>
+  <entry>
+    <id>https://www.reddit.com/r/golang/comments/t3_abc123/post/</id>
+    <title>Post &amp;amp; Title</title>
+    <author><name>alice</name><uri>https://www.reddit.com/user/alice</uri></author>
+    <link href="https://www.reddit.com/r/golang/comments/abc123/post/" />
+    <published>2026-02-02T04:00:00Z</published>
+    <updated>2026-02-02T04:01:00Z</updated>
+    <content type="html">&lt;p&gt;Body &amp;amp; text&lt;/p&gt;</content>
+    <category term="golang"></category>
+  </entry>
+</feed>`
+}
+
+func shredditFixture() string {
+	return `<shreddit-comment thingId="t1_c1" author="alice" created="2026-02-02T04:03:20Z" depth="0" parentId="t3_abc123" permalink="/r/golang/comments/abc123/comment/c1/" score="7" postId="t3_abc123"><div slot="comment"><p>Root &amp;amp; body</p></div></shreddit-comment><shreddit-comment thingId="t1_c2" author="bob" created="2026-02-02T04:04:20Z" depth="1" parentId="t1_c1" permalink="/r/golang/comments/abc123/comment/c2/" score="2" postId="t3_abc123"><div slot="comment"><p>Reply body</p></div></shreddit-comment>`
+}
+
+func arcticCommentsFixture() string {
+	return `{"data":[{"id":"c1","name":"t1_c1","link_id":"t3_abc123","parent_id":"t3_abc123","author":"alice","body":"Root","score":4,"permalink":"/r/golang/comments/abc123/comment/c1/","created_utc":1770000300},{"id":"c2","name":"t1_c2","link_id":"t3_abc123","parent_id":"t1_c1","author":"bob","body":"Reply","score":2,"permalink":"/r/golang/comments/abc123/comment/c2/","created_utc":1770000360}]}`
 }

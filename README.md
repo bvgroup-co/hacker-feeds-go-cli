@@ -67,7 +67,8 @@ hfeeds config --lang en|zh
 hfeeds github [-s daily|weekly|monthly] [-l language]
 hfeeds news [-t top]
 hfeeds product [-c count] [-p past]
-hfeeds reddit [-t topic] [-s hot|new|top|best]
+hfeeds reddit [-t topic] [-c limit]
+hfeeds reddit comments --topic topic --post post_id [--limit n] [--depth n]
 hfeeds v2ex [-n node]
 ```
 
@@ -78,7 +79,8 @@ hfeeds github
 hfeeds github --since weekly --lang go
 hfeeds news --top 5
 hfeeds product --count 5 --past 1
-hfeeds reddit --topic golang --sort top
+hfeeds reddit --topic golang
+hfeeds reddit comments --topic golang --post abc123 --limit 10 --depth 2
 hfeeds v2ex --node programmer
 ```
 
@@ -109,15 +111,28 @@ export PRODUCT_HUNT_ACCESS_TOKEN=your-token
 
 ### Reddit access
 
-The Reddit command first requests Reddit's JSON listing endpoint, then falls back to Reddit's Atom/RSS feed when JSON is rejected with `403 Forbidden` or `429 Too Many Requests`. RSS fallback preserves title, link, topic, and text content; comment and vote counts are not available from the feed and are shown as `0`.
+Reddit does not require OAuth or Reddit app credentials. The CLI uses best-effort public/web sources:
 
-Reddit may block unauthenticated traffic from some networks. If both JSON and RSS are rejected, `hfeeds reddit` prints a Reddit-specific actionable error instead of a generic HTTP status. You can provide a descriptive Reddit user agent if your environment requires one:
+- Listings: Reddit Atom/RSS first, then Arctic Shift as a fallback.
+- Comments: Reddit Shreddit comments HTML first, then Arctic Shift as a fallback.
 
-```sh
-export HFEEDS_REDDIT_USER_AGENT='hfeeds/0.4.4 by your-reddit-username'
+`hfeeds reddit` fetches listings from `https://www.reddit.com/r/{subreddit}/.rss?limit={n}` and prints post title, source label, post ID, subreddit, author, permalink, external URL where available, and content/selftext where available. If Reddit RSS is blocked, rate-limited, or invalid, it falls back to Arctic Shift posts search.
+
+`hfeeds reddit comments --topic golang --post abc123 --limit 10 --depth 2` fetches discussions from `https://www.reddit.com/svc/shreddit/comments/r/{subreddit}/t3_{postID}` and prints post context plus nested comments. If Shreddit HTML is blocked, rate-limited, or cannot be parsed, it falls back to Arctic Shift comments search.
+
+Limitations:
+
+- RSS listings do not reliably include score/upvotes or comment counts.
+- Comments use Reddit web HTML partials and may break if Reddit changes markup.
+- Arctic Shift is a third-party fallback/enrichment source and may lag behind Reddit.
+
+If all no-OAuth sources fail, the command reports:
+
+```text
+Reddit source unavailable without OAuth. Tried reddit-rss/reddit-shreddit and arctic-shift fallback.
 ```
 
-If Reddit still blocks the command, retry later or from another network. The CLI does not currently require or store Reddit OAuth credentials.
+The CLI does not use Reddit OAuth endpoints, Reddit app credentials, or unauthenticated Reddit `.json` endpoints.
 
 The HTTP base URLs can be overridden for tests:
 
@@ -126,6 +141,7 @@ HFEEDS_GITHUB_BASE_URL=http://127.0.0.1:8080
 HFEEDS_HN_BASE_URL=http://127.0.0.1:8081
 HFEEDS_PRODUCT_HUNT_BASE_URL=http://127.0.0.1:8082/graphql
 HFEEDS_REDDIT_BASE_URL=http://127.0.0.1:8083
+HFEEDS_ARCTIC_SHIFT_BASE_URL=http://127.0.0.1:8084
 HFEEDS_V2EX_BASE_URL=http://127.0.0.1:8084
 ```
 
@@ -136,11 +152,11 @@ Set `NO_COLOR=1` in scripts/tests to keep output plain.
 Release automation runs when a semantic version tag is pushed:
 
 ```sh
-git tag v0.4.4
-git push origin v0.4.4
+git tag v0.5.0
+git push origin v0.5.0
 ```
 
-The first release after this change should be `v0.4.4`. Release builds inject the tag version with Go ldflags, so the `v0.4.4` binary reports `0.4.4` from `hfeeds --version`. Local development builds report `dev`.
+Choose the next unused semantic version tag for each release. Release builds inject the tag version with Go ldflags, so a `v0.5.0` binary reports `0.5.0` from `hfeeds --version`. Local development builds report `dev`.
 
 The release workflow uses GoReleaser to build and publish:
 
