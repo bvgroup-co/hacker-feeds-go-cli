@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/bvgroup-co/hacker-feeds-go-cli/internal/config"
@@ -80,11 +81,15 @@ func (app App) help(args []string) int {
 		app.printHelp(app.Out)
 		return 0
 	}
-	app.printCommandHelp(app.Out, args[0])
+	app.printCommandHelp(app.Out, args)
 	return 0
 }
 
 func (app App) config(args []string, labels i18n.Labels) error {
+	if wantsHelp(args) {
+		app.printCommandHelp(app.Out, []string{"config"})
+		return nil
+	}
 	flags, err := parseStringFlags(args, map[string]string{"--lang": ""}, flagSpec{Short: "-l", Long: "--lang"})
 	if err != nil {
 		return err
@@ -136,6 +141,10 @@ func (app App) stdinIsTerminal() bool {
 }
 
 func (app App) github(args []string, labels i18n.Labels) error {
+	if wantsHelp(args) {
+		app.printCommandHelp(app.Out, []string{"github"})
+		return nil
+	}
 	flags, err := parseStringFlags(args, map[string]string{"--since": "daily", "--lang": ""}, flagSpec{Short: "-s", Long: "--since"}, flagSpec{Short: "-l", Long: "--lang"})
 	if err != nil {
 		return err
@@ -158,6 +167,13 @@ func (app App) github(args []string, labels i18n.Labels) error {
 }
 
 func (app App) news(args []string, labels i18n.Labels) error {
+	if wantsHelp(args) {
+		app.printCommandHelp(app.Out, []string{"news"})
+		return nil
+	}
+	if len(args) > 0 && (args[0] == "discussion" || args[0] == "comments") {
+		return app.newsDiscussion(args[1:], labels)
+	}
 	flags, err := parseStringFlags(args, map[string]string{"--top": "10"}, flagSpec{Short: "-t", Long: "--top"})
 	if err != nil {
 		return err
@@ -179,7 +195,40 @@ func (app App) news(args []string, labels i18n.Labels) error {
 	return nil
 }
 
+func (app App) newsDiscussion(args []string, labels i18n.Labels) error {
+	if wantsHelp(args) {
+		app.printCommandHelp(app.Out, []string{"news", "discussion"})
+		return nil
+	}
+	flags, err := parseStringFlags(args, map[string]string{"--id": "", "--limit": "20", "--depth": "3"}, flagSpec{Short: "-i", Long: "--id"}, flagSpec{Short: "-c", Long: "--limit"}, flagSpec{Short: "-d", Long: "--depth"})
+	if err != nil {
+		return err
+	}
+	id, err := feeds.ParsePositiveInt("--id", flags["--id"])
+	if err != nil {
+		return err
+	}
+	limit, err := feeds.ParsePositiveInt("--limit", flags["--limit"])
+	if err != nil {
+		return err
+	}
+	depth, err := feeds.ParsePositiveInt("--depth", flags["--depth"])
+	if err != nil {
+		return err
+	}
+	discussion, err := app.client().FetchNewsDiscussion(id, limit, depth)
+	if err != nil {
+		return err
+	}
+	output.NewsDiscussion(app.Out, labels, discussion)
+	return nil
+}
+
 func (app App) product(args []string, labels i18n.Labels) error {
+	if wantsHelp(args) {
+		app.printCommandHelp(app.Out, []string{"product"})
+		return nil
+	}
 	flags, err := parseStringFlags(args, map[string]string{"--count": "10", "--past": "0"}, flagSpec{Short: "-c", Long: "--count"}, flagSpec{Short: "-p", Long: "--past"})
 	if err != nil {
 		return err
@@ -207,6 +256,10 @@ func (app App) product(args []string, labels i18n.Labels) error {
 }
 
 func (app App) reddit(args []string, labels i18n.Labels) error {
+	if wantsHelp(args) {
+		app.printCommandHelp(app.Out, []string{"reddit"})
+		return nil
+	}
 	if len(args) > 0 && args[0] == "comments" {
 		return app.redditComments(args[1:], labels)
 	}
@@ -232,6 +285,10 @@ func (app App) reddit(args []string, labels i18n.Labels) error {
 }
 
 func (app App) redditComments(args []string, labels i18n.Labels) error {
+	if wantsHelp(args) {
+		app.printCommandHelp(app.Out, []string{"reddit", "comments"})
+		return nil
+	}
 	flags, err := parseStringFlags(args, map[string]string{"--topic": "popular", "--post": "", "--limit": "10", "--depth": "2"}, flagSpec{Short: "-t", Long: "--topic"}, flagSpec{Short: "-p", Long: "--post"}, flagSpec{Short: "-c", Long: "--limit"}, flagSpec{Short: "-d", Long: "--depth"})
 	if err != nil {
 		return err
@@ -253,6 +310,10 @@ func (app App) redditComments(args []string, labels i18n.Labels) error {
 }
 
 func (app App) v2ex(args []string, labels i18n.Labels) error {
+	if wantsHelp(args) {
+		app.printCommandHelp(app.Out, []string{"v2ex"})
+		return nil
+	}
 	flags, err := parseStringFlags(args, map[string]string{"--node": "create"}, flagSpec{Short: "-n", Long: "--node"})
 	if err != nil {
 		return err
@@ -301,21 +362,41 @@ func (app App) printHelp(writer io.Writer) {
 	fmt.Fprintln(writer, "  $ hfeeds github")
 }
 
-func (app App) printCommandHelp(writer io.Writer, command string) {
-	switch command {
+func (app App) printCommandHelp(writer io.Writer, command []string) {
+	switch strings.Join(command, " ") {
 	case "config":
-		fmt.Fprintln(writer, "Usage: hfeeds config --lang en|zh")
+		fmt.Fprintln(writer, "Usage:")
+		fmt.Fprintln(writer, "  hfeeds config --lang en|zh")
 	case "github":
-		fmt.Fprintln(writer, "Usage: hfeeds github [-s daily|weekly|monthly] [-l language]")
+		fmt.Fprintln(writer, "Usage:")
+		fmt.Fprintln(writer, "  hfeeds github [-s daily|weekly|monthly] [-l language]")
 	case "news":
-		fmt.Fprintln(writer, "Usage: hfeeds news [-t top]")
+		fmt.Fprintln(writer, "Usage:")
+		fmt.Fprintln(writer, "  hfeeds news [-t top]")
+		fmt.Fprintln(writer, "  hfeeds news discussion --id item_id [--limit n] [--depth n]")
+		fmt.Fprintln(writer, "  hfeeds news comments --id item_id [--limit n] [--depth n]")
+	case "news discussion", "news comments":
+		fmt.Fprintln(writer, "Usage:")
+		fmt.Fprintln(writer, "  hfeeds news discussion --id item_id [--limit n] [--depth n]")
+		fmt.Fprintln(writer)
+		fmt.Fprintln(writer, "Options:")
+		fmt.Fprintln(writer, "  -i, --id        Hacker News item ID")
+		fmt.Fprintln(writer, "  -c, --limit     maximum comments to print, default 20")
+		fmt.Fprintln(writer, "  -d, --depth     maximum comment depth, default 3")
+		fmt.Fprintln(writer, "  -h, --help      display help")
 	case "product":
-		fmt.Fprintln(writer, "Usage: hfeeds product [-c count] [-p past]")
+		fmt.Fprintln(writer, "Usage:")
+		fmt.Fprintln(writer, "  hfeeds product [-c count] [-p past]")
 	case "reddit":
-		fmt.Fprintln(writer, "Usage: hfeeds reddit [-t topic] [-c limit]")
-		fmt.Fprintln(writer, "       hfeeds reddit comments --topic topic --post post_id [--limit n] [--depth n]")
+		fmt.Fprintln(writer, "Usage:")
+		fmt.Fprintln(writer, "  hfeeds reddit [-t topic] [-c limit]")
+		fmt.Fprintln(writer, "  hfeeds reddit comments --topic topic --post post_id [--limit n] [--depth n]")
+	case "reddit comments":
+		fmt.Fprintln(writer, "Usage:")
+		fmt.Fprintln(writer, "  hfeeds reddit comments --topic topic --post post_id [--limit n] [--depth n]")
 	case "v2ex":
-		fmt.Fprintln(writer, "Usage: hfeeds v2ex [-n node]")
+		fmt.Fprintln(writer, "Usage:")
+		fmt.Fprintln(writer, "  hfeeds v2ex [-n node]")
 	default:
 		app.printHelp(writer)
 	}

@@ -35,9 +35,9 @@ func TestFetchNews(t *testing.T) {
 		case "/topstories.json":
 			_, _ = writer.Write([]byte(`[1,2,3]`))
 		case "/item/1.json":
-			_, _ = writer.Write([]byte(`{"title":"One","url":"https://example.com/one"}`))
+			_, _ = writer.Write([]byte(`{"id":1,"title":"One","url":"https://example.com/one","by":"alice","score":42,"descendants":3}`))
 		case "/item/2.json":
-			_, _ = writer.Write([]byte(`{"title":"Two"}`))
+			_, _ = writer.Write([]byte(`{"id":2,"title":"Two","by":"bob","score":7,"descendants":0}`))
 		default:
 			http.NotFound(writer, request)
 		}
@@ -48,8 +48,83 @@ func TestFetchNews(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 2 || items[0].Title != "One" || items[1].URL != "" {
+	if len(items) != 2 || items[0].ID != 1 || items[0].Author != "alice" || items[0].Score != 42 || items[0].Descendants != 3 || items[1].URL != "" {
 		t.Fatalf("items = %#v", items)
+	}
+}
+
+func TestFetchNewsDiscussion(t *testing.T) {
+	requests := make([]string, 0)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests = append(requests, request.URL.Path)
+		switch request.URL.Path {
+		case "/item/1.json":
+			_, _ = writer.Write([]byte(`{"id":1,"type":"story","by":"alice","title":"Story","url":"https://example.com/story","score":99,"descendants":4,"kids":[2,3,4]}`))
+		case "/item/2.json":
+			_, _ = writer.Write([]byte(`{"id":2,"type":"comment","by":"bob","parent":1,"text":"First &amp; <b>bold</b>","kids":[5]}`))
+		case "/item/3.json":
+			_, _ = writer.Write([]byte(`{"id":3,"type":"comment","deleted":true,"parent":1}`))
+		case "/item/4.json":
+			_, _ = writer.Write([]byte(`{"id":4,"type":"comment","dead":true,"parent":1,"text":"dead text"}`))
+		case "/item/5.json":
+			_, _ = writer.Write([]byte(`{"id":5,"type":"comment","by":"carol","parent":2,"text":"Nested<p>reply"}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	discussion, err := (Client{HTTP: server.Client(), NewsBase: server.URL}).FetchNewsDiscussion(1, 10, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if discussion.Item.ID != 1 || discussion.Item.Author != "alice" || len(discussion.Comments) != 3 {
+		t.Fatalf("discussion = %#v", discussion)
+	}
+	if discussion.Comments[0].Text != "First & bold" || len(discussion.Comments[0].Children) != 1 || discussion.Comments[0].Children[0].Depth != 1 {
+		t.Fatalf("comments = %#v", discussion.Comments)
+	}
+	if !discussion.Comments[1].Deleted || !discussion.Comments[2].Dead {
+		t.Fatalf("deleted/dead = %#v", discussion.Comments)
+	}
+	if strings.Join(requests, ",") != "/item/1.json,/item/2.json,/item/5.json,/item/3.json,/item/4.json" {
+		t.Fatalf("requests = %#v", requests)
+	}
+}
+
+func TestFetchNewsDiscussionLimitAndDepth(t *testing.T) {
+	requests := make([]string, 0)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests = append(requests, request.URL.Path)
+		switch request.URL.Path {
+		case "/item/1.json":
+			_, _ = writer.Write([]byte(`{"id":1,"type":"story","kids":[2,3]}`))
+		case "/item/2.json":
+			_, _ = writer.Write([]byte(`{"id":2,"type":"comment","parent":1,"text":"first","kids":[4]}`))
+		case "/item/3.json":
+			_, _ = writer.Write([]byte(`{"id":3,"type":"comment","parent":1,"text":"second"}`))
+		case "/item/4.json":
+			_, _ = writer.Write([]byte(`{"id":4,"type":"comment","parent":2,"text":"nested"}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	discussion, err := (Client{HTTP: server.Client(), NewsBase: server.URL}).FetchNewsDiscussion(1, 1, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(discussion.Comments) != 1 || discussion.Comments[0].ID != 2 || len(discussion.Comments[0].Children) != 0 {
+		t.Fatalf("limit discussion = %#v", discussion)
+	}
+	requests = requests[:0]
+	discussion, err = (Client{HTTP: server.Client(), NewsBase: server.URL}).FetchNewsDiscussion(1, 10, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(discussion.Comments) != 2 || len(discussion.Comments[0].Children) != 0 || strings.Contains(strings.Join(requests, ","), "/item/4.json") {
+		t.Fatalf("depth discussion = %#v requests=%#v", discussion, requests)
 	}
 }
 
