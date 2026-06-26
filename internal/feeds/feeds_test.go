@@ -92,6 +92,9 @@ func TestFetchReddit(t *testing.T) {
 		if request.URL.Path != "/r/golang/top.json" {
 			t.Fatalf("path = %s", request.URL.Path)
 		}
+		if request.Header.Get("User-Agent") == "" || request.Header.Get("Accept") != "application/json" {
+			t.Fatalf("headers = %#v", request.Header)
+		}
 		_, _ = writer.Write([]byte(`{"data":{"children":[{"data":{"title":"Post","selftext":"Body","num_comments":3,"permalink":"/r/golang/comments/1/post/","ups":9,"subreddit":"golang"}}]}}`))
 	}))
 	defer server.Close()
@@ -102,6 +105,54 @@ func TestFetchReddit(t *testing.T) {
 	}
 	if len(posts) != 1 || posts[0].Link != server.URL+"/r/golang/comments/1/post/" {
 		t.Fatalf("posts = %#v", posts)
+	}
+}
+
+func TestFetchRedditFallsBackToRSS(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		paths = append(paths, request.URL.Path)
+		switch request.URL.Path {
+		case "/r/golang/top.json":
+			http.Error(writer, "blocked", http.StatusForbidden)
+		case "/r/golang/top.rss":
+			if request.Header.Get("Accept") != "application/atom+xml, application/rss+xml, text/xml" {
+				t.Fatalf("accept = %s", request.Header.Get("Accept"))
+			}
+			_, _ = writer.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><entry><category term="golang" label="r/golang"/><content type="html">&lt;div&gt;Fallback &amp;amp; body&lt;/div&gt;</content><link href="https://www.reddit.com/r/golang/comments/1/post/"/><title>RSS Post</title></entry></feed>`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	posts, err := (Client{HTTP: server.Client(), RedditBase: server.URL, RedditUserAgent: "test-agent"}).FetchReddit("golang", "top")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(paths, ",") != "/r/golang/top.json,/r/golang/top.rss" {
+		t.Fatalf("paths = %#v", paths)
+	}
+	if len(posts) != 1 || posts[0].Title != "RSS Post" || posts[0].Content != "Fallback & body" || posts[0].Topic != "golang" || posts[0].Comment != 0 || posts[0].Votes != 0 {
+		t.Fatalf("posts = %#v", posts)
+	}
+}
+
+func TestFetchRedditFallbackErrorIsActionable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		http.Error(writer, "blocked", http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	_, err := (Client{HTTP: server.Client(), RedditBase: server.URL}).FetchReddit("popular", "hot")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	message := err.Error()
+	for _, fragment := range []string{"reddit rejected JSON", "RSS fallback failed", "HFEEDS_REDDIT_USER_AGENT", "see README Reddit notes"} {
+		if !strings.Contains(message, fragment) {
+			t.Fatalf("error missing %s: %s", fragment, message)
+		}
 	}
 }
 
