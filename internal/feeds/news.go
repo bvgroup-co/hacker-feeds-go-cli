@@ -99,6 +99,15 @@ func (client Client) FetchNewsDiscussion(id int, limit int, depth int) (NewsDisc
 	if err != nil {
 		return NewsDiscussion{}, err
 	}
+	if root.Type != "story" {
+		return NewsDiscussion{}, fmt.Errorf("hacker news item %d is not a story", id)
+	}
+	if root.Deleted {
+		return NewsDiscussion{}, fmt.Errorf("hacker news story %d is deleted", id)
+	}
+	if root.Dead {
+		return NewsDiscussion{}, fmt.Errorf("hacker news story %d is dead", id)
+	}
 	remaining := limit
 	discussion := NewsDiscussion{Item: newsItemFromHackerNews(root)}
 	for _, childID := range root.Kids {

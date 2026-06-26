@@ -60,9 +60,11 @@ func writeNewsComment(writer io.Writer, comment feeds.NewsComment) {
 		text = "[dead]"
 	}
 	fmt.Fprintf(writer, "%sComment: %s\n", indent, text)
-	separator(writer)
 	for _, child := range comment.Children {
 		writeNewsComment(writer, child)
+	}
+	if comment.Depth == 0 {
+		separator(writer)
 	}
 }
 

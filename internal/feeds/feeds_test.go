@@ -128,6 +128,37 @@ func TestFetchNewsDiscussionLimitAndDepth(t *testing.T) {
 	}
 }
 
+func TestFetchNewsDiscussionRejectsInvalidRoot(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/item/2.json":
+			_, _ = writer.Write([]byte(`{"id":2,"type":"comment","by":"bob","parent":1,"text":"not a story"}`))
+		case "/item/3.json":
+			_, _ = writer.Write([]byte(`{"id":3,"type":"story","deleted":true,"title":"gone"}`))
+		case "/item/4.json":
+			_, _ = writer.Write([]byte(`{"id":4,"type":"story","dead":true,"title":"dead"}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	client := Client{HTTP: server.Client(), NewsBase: server.URL}
+
+	for _, test := range []struct {
+		id      int
+		message string
+	}{
+		{id: 2, message: "not a story"},
+		{id: 3, message: "deleted"},
+		{id: 4, message: "dead"},
+	} {
+		_, err := client.FetchNewsDiscussion(test.id, 10, 2)
+		if err == nil || !strings.Contains(err.Error(), test.message) {
+			t.Fatalf("id=%d err=%v", test.id, err)
+		}
+	}
+}
+
 func TestFetchProducts(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodPost {
