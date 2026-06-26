@@ -2,6 +2,9 @@ version: 2
 
 project_name: hfeeds
 
+metadata:
+  mod_timestamp: "{{ .CommitTimestamp }}"
+
 before:
   hooks:
     - go mod tidy
@@ -37,18 +40,17 @@ release:
     owner: bvgroup-co
     name: hacker-feeds-go-cli
 
-brews:
+homebrew_casks:
   - name: hfeeds
+    ids:
+      - hfeeds
     repository:
       owner: bvgroup-co
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    directory: Formula
+    directory: Casks
     homepage: https://github.com/bvgroup-co/hacker-feeds-go-cli
     description: Hacker feeds CLI for GitHub Trending, Hacker News, Product Hunt, Reddit, and V2EX
     license: MIT
-    test: |
-      system "#{bin}/hfeeds", "--version"
-      system "#{bin}/hfeeds", "--help"
-    install: |
-      bin.install "hfeeds"
+    binaries:
+      - hfeeds
