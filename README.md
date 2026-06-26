@@ -19,7 +19,7 @@ Verify the installed binary:
 hfeeds --version
 ```
 
-Homebrew releases are published through the `bvgroup-co/homebrew-tap` repository. Release automation requires the repository secret `HOMEBREW_TAP_TOKEN` with permission to push Homebrew cask updates to that tap.
+Homebrew releases are published through the `bvgroup-co/homebrew-tap` repository. Release automation requires the repository secret `HOMEBREW_TAP_TOKEN` with permission to push Homebrew formula updates to that tap.
 
 ### Go install
 
@@ -138,7 +138,7 @@ The release workflow uses GoReleaser to build and publish:
 - `hfeeds_<version>_darwin_arm64.tar.gz`
 - `checksums.txt`
 
-Homebrew cask updates are committed to `bvgroup-co/homebrew-tap`. Configure the `HOMEBREW_TAP_TOKEN` repository secret before cutting a release; the token must be able to push to the tap repository.
+Homebrew formula updates are committed to `bvgroup-co/homebrew-tap` under `Formula/hfeeds.rb`. Configure the `HOMEBREW_TAP_TOKEN` repository secret before cutting a release; the token must be able to push to the tap repository.
 
 ## Development
 

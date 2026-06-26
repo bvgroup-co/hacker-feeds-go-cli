@@ -40,7 +40,7 @@ release:
     owner: bvgroup-co
     name: hacker-feeds-go-cli
 
-homebrew_casks:
+brews:
   - name: hfeeds
     ids:
       - hfeeds
@@ -48,9 +48,10 @@ homebrew_casks:
       owner: bvgroup-co
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    directory: Casks
+    directory: Formula
     homepage: https://github.com/bvgroup-co/hacker-feeds-go-cli
     description: Hacker feeds CLI for GitHub Trending, Hacker News, Product Hunt, Reddit, and V2EX
     license: MIT
-    binaries:
-      - hfeeds
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/hfeeds --version")
+      assert_match "hfeeds", shell_output("#{bin}/hfeeds --help")
