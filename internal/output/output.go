@@ -47,7 +47,8 @@ func Reddit(writer io.Writer, labels i18n.Labels, posts []feeds.RedditPost) {
 	header(writer, labels.Reddit.Header)
 	for _, post := range posts {
 		fmt.Fprintf(writer, "%s: %s\n", labels.Reddit.Title, post.Title)
-		fmt.Fprintf(writer, "%s: %d | %s: %d | Score: %d | %s: %s | Author: %s\n", labels.Reddit.Comment, post.NumComments, labels.Reddit.Votes, post.Ups, post.Score, labels.Reddit.Topic, post.Subreddit, post.Author)
+		fmt.Fprintf(writer, "ID: %s | Source: %s | %s: %s | Author: %s\n", post.ID, post.Source, labels.Reddit.Topic, post.Subreddit, post.Author)
+		fmt.Fprintf(writer, "%s: %d | %s: %d | Score: %d\n", labels.Reddit.Comment, post.NumComments, labels.Reddit.Votes, post.Ups, post.Score)
 		if post.URL != "" {
 			fmt.Fprintf(writer, "URL: %s\n", post.URL)
 		}
@@ -65,13 +66,20 @@ func Reddit(writer io.Writer, labels i18n.Labels, posts []feeds.RedditPost) {
 func RedditDiscussion(writer io.Writer, labels i18n.Labels, discussion feeds.RedditDiscussion) {
 	header(writer, labels.Reddit.Header)
 	post := discussion.Post
+	if post.ID != "" || post.Subreddit != "" || post.Title != "" {
+		fmt.Fprintf(writer, "ID: %s | Source: %s | %s: %s\n", post.ID, post.Source, labels.Reddit.Topic, post.Subreddit)
+	}
 	if post.Title != "" {
 		fmt.Fprintf(writer, "%s: %s\n", labels.Reddit.Title, post.Title)
 		fmt.Fprintf(writer, "%s: %d | %s: %d | Score: %d | %s: %s | Author: %s\n", labels.Reddit.Comment, post.NumComments, labels.Reddit.Votes, post.Ups, post.Score, labels.Reddit.Topic, post.Subreddit, post.Author)
-		fmt.Fprintf(writer, "%s: %s\n", labels.Reddit.Link, post.Permalink)
+		if post.Permalink != "" {
+			fmt.Fprintf(writer, "%s: %s\n", labels.Reddit.Link, post.Permalink)
+		}
 		if post.Content != "" {
 			fmt.Fprintf(writer, "%s: %s\n", labels.Reddit.Content, post.Content)
 		}
+		separator(writer)
+	} else if post.ID != "" || post.Subreddit != "" || post.Source != "" {
 		separator(writer)
 	}
 	for _, comment := range discussion.Comments {
@@ -89,7 +97,7 @@ func writeRedditComment(writer io.Writer, comment feeds.RedditComment, depth int
 		separator(writer)
 		return
 	}
-	fmt.Fprintf(writer, "%sAuthor: %s | Score: %d\n", indent, comment.Author, comment.Score)
+	fmt.Fprintf(writer, "%sAuthor: %s | Score: %d | Source: %s\n", indent, comment.Author, comment.Score, comment.Source)
 	if comment.Body != "" {
 		fmt.Fprintf(writer, "%sComment: %s\n", indent, comment.Body)
 	}

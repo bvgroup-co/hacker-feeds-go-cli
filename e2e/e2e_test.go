@@ -175,12 +175,10 @@ func TestProductRedditV2EXE2E(t *testing.T) {
 
 	redditServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
-		case "/token":
-			_, _ = writer.Write([]byte(`{"access_token":"token","token_type":"bearer","expires_in":3600,"scope":"*"}`))
-		case "/r/popular/hot", "/r/golang/top", "/r/popular/new", "/r/popular/best":
-			_, _ = writer.Write([]byte(`{"data":{"children":[{"kind":"t3","data":{"title":"Post","selftext":"","url":"https://example.com/post","num_comments":1,"permalink":"/r/popular/comments/1/post/","ups":2,"score":3,"subreddit":"popular","author":"alice","domain":"example.com"}}]}}`))
-		case "/r/golang/comments/1":
-			_, _ = writer.Write([]byte(`[{"data":{"children":[{"kind":"t3","data":{"title":"Post","permalink":"/r/golang/comments/1/post/","ups":2,"score":3,"num_comments":1,"subreddit":"golang","author":"alice"}}]}},{"data":{"children":[{"kind":"t1","data":{"author":"bob","body":"Comment body","score":5,"permalink":"/r/golang/comments/1/comment/c1/","replies":""}}]}}]`))
+		case "/r/popular/.rss", "/r/golang/.rss":
+			_, _ = writer.Write([]byte(redditE2ERSS()))
+		case "/svc/shreddit/comments/r/golang/t3_1":
+			_, _ = writer.Write([]byte(redditE2EShreddit()))
 		default:
 			http.NotFound(writer, request)
 		}
@@ -198,7 +196,7 @@ func TestProductRedditV2EXE2E(t *testing.T) {
 	}
 	home = writeLang(t, "zh")
 	result = run(t, []string{"reddit"}, append([]string{"HOME=" + home}, redditEnv(redditServer)...))
-	if result.code != 0 || !strings.Contains(result.stdout, "Reddit 帖子") || !strings.Contains(result.stdout, "投票: 2") || !strings.Contains(result.stdout, "话题: popular") {
+	if result.code != 0 || !strings.Contains(result.stdout, "Reddit 帖子") || !strings.Contains(result.stdout, "投票: 0") || !strings.Contains(result.stdout, "话题: popular") {
 		t.Fatalf("reddit zh = %#v", result)
 	}
 	result = run(t, []string{"reddit", "-s", "bad"}, redditEnv(redditServer))
@@ -340,11 +338,13 @@ func TestErrorAndEmptyE2E(t *testing.T) {
 	}
 	redditServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
-		case "/token":
-			_, _ = writer.Write([]byte(`{"access_token":"token","token_type":"bearer","expires_in":3600,"scope":"*"}`))
-		case "/r/popular/hot":
-			_, _ = writer.Write([]byte(`{"data":{"children":[]}}`))
-		case "/r/popular/top":
+		case "/r/popular/.rss":
+			if request.URL.Query().Get("fail") == "1" {
+				http.Error(writer, "too many", http.StatusTooManyRequests)
+				return
+			}
+			_, _ = writer.Write([]byte(`<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"></feed>`))
+		case "/api/posts/search":
 			http.Error(writer, "too many", http.StatusTooManyRequests)
 		default:
 			http.NotFound(writer, request)
@@ -355,21 +355,21 @@ func TestErrorAndEmptyE2E(t *testing.T) {
 	if result.code != 0 || !strings.Contains(result.stdout, "ranking has not yet been updated") {
 		t.Fatalf("reddit empty = %#v", result)
 	}
-	result = run(t, []string{"reddit", "-s", "top"}, redditEnv(redditServer))
-	if result.code == 0 || !strings.Contains(result.stderr, "429 rate limited") {
+	redditFailServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		http.Error(writer, "too many", http.StatusTooManyRequests)
+	}))
+	defer redditFailServer.Close()
+	result = run(t, []string{"reddit", "-s", "top"}, redditEnv(redditFailServer))
+	if result.code == 0 || !strings.Contains(result.stderr, "Reddit source unavailable without OAuth") {
 		t.Fatalf("reddit rate limited = %#v", result)
 	}
 
 	redditBlockedServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == "/token" {
-			_, _ = writer.Write([]byte(`{"access_token":"token","token_type":"bearer","expires_in":3600,"scope":"*"}`))
-			return
-		}
 		http.Error(writer, "blocked", http.StatusForbidden)
 	}))
 	defer redditBlockedServer.Close()
 	result = run(t, []string{"reddit"}, redditEnv(redditBlockedServer))
-	if result.code == 0 || !strings.Contains(result.stderr, "403 Reddit API forbidden; check app setup/scopes/user-agent") || strings.TrimSpace(result.stderr) == "request failed with status 403" {
+	if result.code == 0 || !strings.Contains(result.stderr, "Reddit source unavailable without OAuth") || strings.TrimSpace(result.stderr) == "request failed with status 403" {
 		t.Fatalf("reddit blocked = %#v", result)
 	}
 
@@ -396,10 +396,16 @@ func TestErrorAndEmptyE2E(t *testing.T) {
 
 func redditEnv(server *httptest.Server) []string {
 	return []string{
-		"HFEEDS_REDDIT_OAUTH_BASE_URL=" + server.URL,
-		"HFEEDS_REDDIT_TOKEN_URL=" + server.URL + "/token",
-		"HFEEDS_REDDIT_CLIENT_ID=client",
-		"HFEEDS_REDDIT_DEVICE_ID=device",
+		"HFEEDS_REDDIT_BASE_URL=" + server.URL,
+		"HFEEDS_ARCTIC_SHIFT_BASE_URL=" + server.URL,
 		"HFEEDS_REDDIT_USER_AGENT=agent",
 	}
+}
+
+func redditE2ERSS() string {
+	return `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>/r/popular</title><category term="popular"></category><entry><id>https://www.reddit.com/r/popular/comments/t3_1/post/</id><title>Post</title><author><name>alice</name></author><link href="https://www.reddit.com/r/popular/comments/1/post/" /><content type="html"></content><category term="popular"></category></entry></feed>`
+}
+
+func redditE2EShreddit() string {
+	return `<shreddit-comment thingId="t1_c1" author="bob" created="1770000000" depth="0" parentId="t3_1" permalink="/r/golang/comments/1/comment/c1/" score="5" postId="t3_1"><div slot="comment">Comment body</div></shreddit-comment>`
 }

@@ -111,29 +111,29 @@ export PRODUCT_HUNT_ACCESS_TOKEN=your-token
 
 ### Reddit access
 
-Reddit OAuth is required. The CLI uses Reddit app-only OAuth for an installed app and does not access user accounts. No client secret is needed for installed-client mode.
+Reddit does not require OAuth or Reddit app credentials. The CLI uses best-effort public/web sources:
 
-Create a Reddit installed app, then export:
+- Listings: Reddit Atom/RSS first, then Arctic Shift as a fallback.
+- Comments: Reddit Shreddit comments HTML first, then Arctic Shift as a fallback.
 
-```sh
-export HFEEDS_REDDIT_CLIENT_ID='your installed-app client id'
-export HFEEDS_REDDIT_DEVICE_ID='stable-20-to-30-char-id'
-export HFEEDS_REDDIT_USER_AGENT='hfeeds/0.5.0 by your-reddit-username'
-```
+`hfeeds reddit` fetches listings from `https://www.reddit.com/r/{subreddit}/.rss?limit={n}` and prints post title, source label, post ID, subreddit, author, permalink, external URL where available, and content/selftext where available. If Reddit RSS is blocked, rate-limited, or invalid, it falls back to Arctic Shift posts search.
 
-`hfeeds reddit` fetches authenticated listings from `https://oauth.reddit.com/r/{subreddit}/{sort}` and prints post title, selftext when available, external URL, Reddit permalink, score/votes, comment count, subreddit, author, and domain.
+`hfeeds reddit comments --topic golang --post abc123 --limit 10 --depth 2 --sort top` fetches discussions from `https://www.reddit.com/svc/shreddit/comments/r/{subreddit}/t3_{postID}` and prints post context plus nested comments. If Shreddit HTML is blocked, rate-limited, or cannot be parsed, it falls back to Arctic Shift comments search.
 
-`hfeeds reddit comments --topic golang --post abc123 --limit 10 --depth 2 --sort top` fetches authenticated discussions from `https://oauth.reddit.com/r/{subreddit}/comments/{post_id}` and prints post details plus nested comments. Supported comment sorts are `confidence`, `top`, `new`, `controversial`, `old`, and `qa`.
+Limitations:
 
-Missing Reddit config fails before any network request with:
+- RSS listings do not reliably include score/upvotes or comment counts.
+- Reddit sort support is limited compared with the Reddit API.
+- Comments use Reddit web HTML partials and may break if Reddit changes markup.
+- Arctic Shift is a third-party fallback/enrichment source and may lag behind Reddit.
+
+If all no-OAuth sources fail, the command reports:
 
 ```text
-Reddit OAuth is required. Set HFEEDS_REDDIT_CLIENT_ID, HFEEDS_REDDIT_DEVICE_ID, and HFEEDS_REDDIT_USER_AGENT.
+Reddit source unavailable without OAuth. Tried reddit-rss/reddit-shreddit and arctic-shift fallback.
 ```
 
-Token and API errors are mapped to actionable messages for invalid credentials, invalid grant/device ID, forbidden app setup or user agent, missing subreddit/post, rate limiting with `Retry-After` when provided, and Reddit server errors.
-
-The prior RSS and unauthenticated `.json` fallback was removed because it is unreliable, incomplete, and lacks votes/comments.
+The CLI does not use Reddit OAuth endpoints, Reddit app credentials, or unauthenticated Reddit `.json` endpoints.
 
 The HTTP base URLs can be overridden for tests:
 
@@ -141,8 +141,8 @@ The HTTP base URLs can be overridden for tests:
 HFEEDS_GITHUB_BASE_URL=http://127.0.0.1:8080
 HFEEDS_HN_BASE_URL=http://127.0.0.1:8081
 HFEEDS_PRODUCT_HUNT_BASE_URL=http://127.0.0.1:8082/graphql
-HFEEDS_REDDIT_OAUTH_BASE_URL=http://127.0.0.1:8083
-HFEEDS_REDDIT_TOKEN_URL=http://127.0.0.1:8083/token
+HFEEDS_REDDIT_BASE_URL=http://127.0.0.1:8083
+HFEEDS_ARCTIC_SHIFT_BASE_URL=http://127.0.0.1:8084
 HFEEDS_V2EX_BASE_URL=http://127.0.0.1:8084
 ```
 

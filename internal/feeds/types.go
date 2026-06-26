@@ -1,24 +1,17 @@
 package feeds
 
-import (
-	"net/http"
-	"time"
-)
+import "net/http"
 
 type Client struct {
 	HTTP            *http.Client
 	GitHubBase      string
 	NewsBase        string
 	ProductBase     string
-	RedditOAuthBase string
-	RedditTokenURL  string
-	RedditClientID  string
-	RedditDeviceID  string
+	RedditBase      string
+	ArcticShiftBase string
 	RedditUserAgent string
 	V2EXBase        string
 	ProductToken    string
-	Now             func() time.Time
-	redditToken     redditToken
 }
 
 type GitHubRepo struct {
@@ -53,12 +46,15 @@ type RedditPost struct {
 	Permalink   string
 	Subreddit   string
 	Author      string
+	AuthorURI   string
 	Score       int
 	Ups         int
 	NumComments int
 	CreatedUTC  int64
+	UpdatedUTC  int64
 	IsSelf      bool
 	Domain      string
+	Source      string
 }
 
 type RedditDiscussion struct {
@@ -69,11 +65,15 @@ type RedditDiscussion struct {
 type RedditComment struct {
 	ID         string
 	Name       string
+	ParentID   string
+	PostID     string
 	Author     string
 	Body       string
 	Score      int
 	CreatedUTC int64
 	Permalink  string
+	Depth      int
+	Source     string
 	Replies    []RedditComment
 	More       bool
 	Count      int
@@ -94,14 +94,11 @@ func NewClientFromEnv(getenv func(string) string) Client {
 		GitHubBase:      valueOrDefault(getenv("HFEEDS_GITHUB_BASE_URL"), "https://github.com"),
 		NewsBase:        valueOrDefault(getenv("HFEEDS_HN_BASE_URL"), "https://hacker-news.firebaseio.com/v0"),
 		ProductBase:     valueOrDefault(getenv("HFEEDS_PRODUCT_HUNT_BASE_URL"), "https://api.producthunt.com/v2/api/graphql/"),
-		RedditOAuthBase: valueOrDefault(getenv("HFEEDS_REDDIT_OAUTH_BASE_URL"), defaultRedditOAuthBase),
-		RedditTokenURL:  valueOrDefault(getenv("HFEEDS_REDDIT_TOKEN_URL"), defaultRedditTokenURL),
-		RedditClientID:  getenv("HFEEDS_REDDIT_CLIENT_ID"),
-		RedditDeviceID:  getenv("HFEEDS_REDDIT_DEVICE_ID"),
+		RedditBase:      valueOrDefault(getenv("HFEEDS_REDDIT_BASE_URL"), defaultRedditBase),
+		ArcticShiftBase: valueOrDefault(getenv("HFEEDS_ARCTIC_SHIFT_BASE_URL"), defaultArcticShiftBase),
 		RedditUserAgent: getenv("HFEEDS_REDDIT_USER_AGENT"),
 		V2EXBase:        valueOrDefault(getenv("HFEEDS_V2EX_BASE_URL"), "https://www.v2ex.com"),
 		ProductToken:    getenv("PRODUCT_HUNT_ACCESS_TOKEN"),
-		Now:             time.Now,
 	}
 	return client
 }
