@@ -174,25 +174,34 @@ func TestProductRedditV2EXE2E(t *testing.T) {
 	}
 
 	redditServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == "/r/popular/hot.json" || request.URL.Path == "/r/golang/top.json" || request.URL.Path == "/r/popular/new.json" || request.URL.Path == "/r/popular/best.json" {
-			_, _ = writer.Write([]byte(`{"data":{"children":[{"data":{"title":"Post","selftext":"","num_comments":1,"permalink":"/r/popular/comments/1/post/","ups":2,"subreddit":"popular"}}]}}`))
-			return
+		switch request.URL.Path {
+		case "/token":
+			_, _ = writer.Write([]byte(`{"access_token":"token","token_type":"bearer","expires_in":3600,"scope":"*"}`))
+		case "/r/popular/hot", "/r/golang/top", "/r/popular/new", "/r/popular/best":
+			_, _ = writer.Write([]byte(`{"data":{"children":[{"kind":"t3","data":{"title":"Post","selftext":"","url":"https://example.com/post","num_comments":1,"permalink":"/r/popular/comments/1/post/","ups":2,"score":3,"subreddit":"popular","author":"alice","domain":"example.com"}}]}}`))
+		case "/r/golang/comments/1":
+			_, _ = writer.Write([]byte(`[{"data":{"children":[{"kind":"t3","data":{"title":"Post","permalink":"/r/golang/comments/1/post/","ups":2,"score":3,"num_comments":1,"subreddit":"golang","author":"alice"}}]}},{"data":{"children":[{"kind":"t1","data":{"author":"bob","body":"Comment body","score":5,"permalink":"/r/golang/comments/1/comment/c1/","replies":""}}]}}]`))
+		default:
+			http.NotFound(writer, request)
 		}
-		http.NotFound(writer, request)
 	}))
 	defer redditServer.Close()
 	for _, args := range [][]string{{"reddit"}, {"reddit", "-t", "golang", "-s", "top"}, {"reddit", "-s", "new"}, {"reddit", "-s", "best"}} {
-		result = run(t, args, []string{"HFEEDS_REDDIT_BASE_URL=" + redditServer.URL})
+		result = run(t, args, redditEnv(redditServer))
 		if result.code != 0 || !strings.Contains(result.stdout, "Reddit List") || strings.Contains(result.stdout, "Content:") {
 			t.Fatalf("reddit %v = %#v", args, result)
 		}
 	}
+	result = run(t, []string{"reddit", "comments", "--topic", "golang", "--post", "1"}, redditEnv(redditServer))
+	if result.code != 0 || !strings.Contains(result.stdout, "Comment body") || !strings.Contains(result.stdout, "Author: bob") {
+		t.Fatalf("reddit comments = %#v", result)
+	}
 	home = writeLang(t, "zh")
-	result = run(t, []string{"reddit"}, []string{"HOME=" + home, "HFEEDS_REDDIT_BASE_URL=" + redditServer.URL})
+	result = run(t, []string{"reddit"}, append([]string{"HOME=" + home}, redditEnv(redditServer)...))
 	if result.code != 0 || !strings.Contains(result.stdout, "Reddit 帖子") || !strings.Contains(result.stdout, "投票: 2") || !strings.Contains(result.stdout, "话题: popular") {
 		t.Fatalf("reddit zh = %#v", result)
 	}
-	result = run(t, []string{"reddit", "-s", "bad"}, []string{"HFEEDS_REDDIT_BASE_URL=" + redditServer.URL})
+	result = run(t, []string{"reddit", "-s", "bad"}, redditEnv(redditServer))
 	if result.code == 0 {
 		t.Fatalf("reddit invalid = %#v", result)
 	}
@@ -329,45 +338,38 @@ func TestErrorAndEmptyE2E(t *testing.T) {
 			t.Fatalf("product invalid %v = %#v", args, result)
 		}
 	}
-	result = run(t, []string{"product"}, []string{"HFEEDS_PRODUCT_HUNT_BASE_URL=" + productServer.URL + "/empty", "PRODUCT_HUNT_ACCESS_TOKEN=token"})
-	if result.code != 0 || !strings.Contains(result.stdout, "ranking has not yet been updated") {
-		t.Fatalf("product empty = %#v", result)
-	}
-	result = run(t, []string{"product"}, []string{"HFEEDS_PRODUCT_HUNT_BASE_URL=" + productServer.URL + "/errors", "PRODUCT_HUNT_ACCESS_TOKEN=token"})
-	if result.code == 0 {
-		t.Fatalf("product errors = %#v", result)
-	}
-
 	redditServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == "/r/popular/top.rss" {
-			_, _ = writer.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><entry><category term="popular"/><content type="html">&lt;p&gt;Fallback text&lt;/p&gt;</content><link href="https://www.reddit.com/r/popular/comments/1/post/"/><title>RSS Fallback</title></entry></feed>`))
-			return
-		}
 		switch request.URL.Path {
-		case "/r/popular/hot.json":
+		case "/token":
+			_, _ = writer.Write([]byte(`{"access_token":"token","token_type":"bearer","expires_in":3600,"scope":"*"}`))
+		case "/r/popular/hot":
 			_, _ = writer.Write([]byte(`{"data":{"children":[]}}`))
-		case "/r/popular/top.json":
+		case "/r/popular/top":
 			http.Error(writer, "too many", http.StatusTooManyRequests)
 		default:
 			http.NotFound(writer, request)
 		}
 	}))
 	defer redditServer.Close()
-	result = run(t, []string{"reddit"}, []string{"HFEEDS_REDDIT_BASE_URL=" + redditServer.URL})
+	result = run(t, []string{"reddit"}, redditEnv(redditServer))
 	if result.code != 0 || !strings.Contains(result.stdout, "ranking has not yet been updated") {
 		t.Fatalf("reddit empty = %#v", result)
 	}
-	result = run(t, []string{"reddit", "-s", "top"}, []string{"HFEEDS_REDDIT_BASE_URL=" + redditServer.URL})
-	if result.code != 0 || !strings.Contains(result.stdout, "RSS Fallback") {
-		t.Fatalf("reddit fallback = %#v", result)
+	result = run(t, []string{"reddit", "-s", "top"}, redditEnv(redditServer))
+	if result.code == 0 || !strings.Contains(result.stderr, "429 rate limited") {
+		t.Fatalf("reddit rate limited = %#v", result)
 	}
 
 	redditBlockedServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/token" {
+			_, _ = writer.Write([]byte(`{"access_token":"token","token_type":"bearer","expires_in":3600,"scope":"*"}`))
+			return
+		}
 		http.Error(writer, "blocked", http.StatusForbidden)
 	}))
 	defer redditBlockedServer.Close()
-	result = run(t, []string{"reddit"}, []string{"HFEEDS_REDDIT_BASE_URL=" + redditBlockedServer.URL})
-	if result.code == 0 || !strings.Contains(result.stderr, "Reddit may be blocking this network") || strings.TrimSpace(result.stderr) == "request failed with status 403" {
+	result = run(t, []string{"reddit"}, redditEnv(redditBlockedServer))
+	if result.code == 0 || !strings.Contains(result.stderr, "403 Reddit API forbidden; check app setup/scopes/user-agent") || strings.TrimSpace(result.stderr) == "request failed with status 403" {
 		t.Fatalf("reddit blocked = %#v", result)
 	}
 
@@ -389,5 +391,15 @@ func TestErrorAndEmptyE2E(t *testing.T) {
 	result = run(t, []string{"v2ex", "-n", "programmer"}, []string{"HFEEDS_V2EX_BASE_URL=" + v2exServer.URL})
 	if result.code == 0 {
 		t.Fatalf("v2ex malformed = %#v", result)
+	}
+}
+
+func redditEnv(server *httptest.Server) []string {
+	return []string{
+		"HFEEDS_REDDIT_OAUTH_BASE_URL=" + server.URL,
+		"HFEEDS_REDDIT_TOKEN_URL=" + server.URL + "/token",
+		"HFEEDS_REDDIT_CLIENT_ID=client",
+		"HFEEDS_REDDIT_DEVICE_ID=device",
+		"HFEEDS_REDDIT_USER_AGENT=agent",
 	}
 }

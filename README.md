@@ -67,7 +67,8 @@ hfeeds config --lang en|zh
 hfeeds github [-s daily|weekly|monthly] [-l language]
 hfeeds news [-t top]
 hfeeds product [-c count] [-p past]
-hfeeds reddit [-t topic] [-s hot|new|top|best]
+hfeeds reddit [-t topic] [-s hot|new|top|best] [-c limit]
+hfeeds reddit comments --topic topic --post post_id [--limit n] [--depth n] [--sort confidence|top|new|controversial|old|qa]
 hfeeds v2ex [-n node]
 ```
 
@@ -79,6 +80,7 @@ hfeeds github --since weekly --lang go
 hfeeds news --top 5
 hfeeds product --count 5 --past 1
 hfeeds reddit --topic golang --sort top
+hfeeds reddit comments --topic golang --post abc123 --limit 10 --depth 2 --sort top
 hfeeds v2ex --node programmer
 ```
 
@@ -109,15 +111,29 @@ export PRODUCT_HUNT_ACCESS_TOKEN=your-token
 
 ### Reddit access
 
-The Reddit command first requests Reddit's JSON listing endpoint, then falls back to Reddit's Atom/RSS feed when JSON is rejected with `403 Forbidden` or `429 Too Many Requests`. RSS fallback preserves title, link, topic, and text content; comment and vote counts are not available from the feed and are shown as `0`.
+Reddit OAuth is required. The CLI uses Reddit app-only OAuth for an installed app and does not access user accounts. No client secret is needed for installed-client mode.
 
-Reddit may block unauthenticated traffic from some networks. If both JSON and RSS are rejected, `hfeeds reddit` prints a Reddit-specific actionable error instead of a generic HTTP status. You can provide a descriptive Reddit user agent if your environment requires one:
+Create a Reddit installed app, then export:
 
 ```sh
-export HFEEDS_REDDIT_USER_AGENT='hfeeds/0.4.4 by your-reddit-username'
+export HFEEDS_REDDIT_CLIENT_ID='your installed-app client id'
+export HFEEDS_REDDIT_DEVICE_ID='stable-20-to-30-char-id'
+export HFEEDS_REDDIT_USER_AGENT='hfeeds/0.5.0 by your-reddit-username'
 ```
 
-If Reddit still blocks the command, retry later or from another network. The CLI does not currently require or store Reddit OAuth credentials.
+`hfeeds reddit` fetches authenticated listings from `https://oauth.reddit.com/r/{subreddit}/{sort}` and prints post title, selftext when available, external URL, Reddit permalink, score/votes, comment count, subreddit, author, and domain.
+
+`hfeeds reddit comments --topic golang --post abc123 --limit 10 --depth 2 --sort top` fetches authenticated discussions from `https://oauth.reddit.com/r/{subreddit}/comments/{post_id}` and prints post details plus nested comments. Supported comment sorts are `confidence`, `top`, `new`, `controversial`, `old`, and `qa`.
+
+Missing Reddit config fails before any network request with:
+
+```text
+Reddit OAuth is required. Set HFEEDS_REDDIT_CLIENT_ID, HFEEDS_REDDIT_DEVICE_ID, and HFEEDS_REDDIT_USER_AGENT.
+```
+
+Token and API errors are mapped to actionable messages for invalid credentials, invalid grant/device ID, forbidden app setup or user agent, missing subreddit/post, rate limiting with `Retry-After` when provided, and Reddit server errors.
+
+The prior RSS and unauthenticated `.json` fallback was removed because it is unreliable, incomplete, and lacks votes/comments.
 
 The HTTP base URLs can be overridden for tests:
 
@@ -125,7 +141,8 @@ The HTTP base URLs can be overridden for tests:
 HFEEDS_GITHUB_BASE_URL=http://127.0.0.1:8080
 HFEEDS_HN_BASE_URL=http://127.0.0.1:8081
 HFEEDS_PRODUCT_HUNT_BASE_URL=http://127.0.0.1:8082/graphql
-HFEEDS_REDDIT_BASE_URL=http://127.0.0.1:8083
+HFEEDS_REDDIT_OAUTH_BASE_URL=http://127.0.0.1:8083
+HFEEDS_REDDIT_TOKEN_URL=http://127.0.0.1:8083/token
 HFEEDS_V2EX_BASE_URL=http://127.0.0.1:8084
 ```
 

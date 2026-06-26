@@ -1,163 +1,380 @@
 package feeds
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"fmt"
-	"html"
+	"io"
 	"net/http"
 	"net/url"
-	"regexp"
+	"strconv"
 	"strings"
+	"time"
 )
 
-const defaultRedditUserAgent = "hfeeds/0.4.4 by bvgroup-co"
+const (
+	defaultRedditOAuthBase = "https://oauth.reddit.com"
+	defaultRedditTokenURL  = "https://www.reddit.com/api/v1/access_token"
+	redditInstalledGrant   = "https://oauth.reddit.com/grants/installed_client"
+	redditTokenRefreshSkew = time.Minute
+)
 
-var htmlTagPattern = regexp.MustCompile(`<[^>]*>`)
+var errMissingRedditOAuthConfig = errors.New("Reddit OAuth is required. Set HFEEDS_REDDIT_CLIENT_ID, HFEEDS_REDDIT_DEVICE_ID, and HFEEDS_REDDIT_USER_AGENT.")
 
-type redditResponse struct {
+type redditToken struct {
+	AccessToken string
+	TokenType   string
+	ExpiresAt   time.Time
+}
+
+type redditTokenResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	ExpiresIn   int    `json:"expires_in"`
+	Scope       string `json:"scope"`
+}
+
+type redditListingResponse struct {
 	Data struct {
-		Children []struct {
-			Data struct {
-				Title     string `json:"title"`
-				Content   string `json:"selftext"`
-				Comment   int    `json:"num_comments"`
-				Permalink string `json:"permalink"`
-				Votes     int    `json:"ups"`
-				Topic     string `json:"subreddit"`
-			} `json:"data"`
-		} `json:"children"`
+		Children []redditThing `json:"children"`
 	} `json:"data"`
 }
 
-type redditAtomFeed struct {
-	Entries []redditAtomEntry `xml:"entry"`
+type redditListingArray []redditListingResponse
+
+type redditThing struct {
+	Kind string          `json:"kind"`
+	Data json.RawMessage `json:"data"`
 }
 
-type redditAtomEntry struct {
-	Title      string         `xml:"title"`
-	Content    string         `xml:"content"`
-	Link       redditAtomLink `xml:"link"`
-	Categories []struct {
-		Term string `xml:"term,attr"`
-	} `xml:"category"`
+type redditPostData struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Title       string  `json:"title"`
+	SelfText    string  `json:"selftext"`
+	URL         string  `json:"url"`
+	Permalink   string  `json:"permalink"`
+	Subreddit   string  `json:"subreddit"`
+	Author      string  `json:"author"`
+	Score       int     `json:"score"`
+	Ups         int     `json:"ups"`
+	NumComments int     `json:"num_comments"`
+	CreatedUTC  float64 `json:"created_utc"`
+	IsSelf      bool    `json:"is_self"`
+	Domain      string  `json:"domain"`
 }
 
-type redditAtomLink struct {
-	Href string `xml:"href,attr"`
+type redditCommentData struct {
+	ID         string          `json:"id"`
+	Name       string          `json:"name"`
+	Author     string          `json:"author"`
+	Body       string          `json:"body"`
+	Score      int             `json:"score"`
+	CreatedUTC float64         `json:"created_utc"`
+	Permalink  string          `json:"permalink"`
+	Replies    json.RawMessage `json:"replies"`
+	Count      int             `json:"count"`
 }
 
 func ValidRedditSort(sort string) bool {
 	return sort == "hot" || sort == "new" || sort == "top" || sort == "best"
 }
 
-func (client Client) FetchReddit(topic string, sort string) ([]RedditPost, error) {
+func ValidRedditCommentSort(sort string) bool {
+	switch sort {
+	case "confidence", "top", "new", "controversial", "old", "qa":
+		return true
+	default:
+		return false
+	}
+}
+
+func (client *Client) FetchReddit(topic string, sort string, limit int) ([]RedditPost, error) {
 	if !ValidRedditSort(sort) {
 		return nil, fmt.Errorf("sort must be hot, new, top, or best")
 	}
-	posts, err := client.fetchRedditJSON(topic, sort)
-	if err == nil {
-		return posts, nil
+	if limit <= 0 {
+		return nil, fmt.Errorf("limit must be greater than 0")
 	}
-	if !shouldFallbackToRedditRSS(err) {
+	if err := client.validateRedditOAuthConfig(); err != nil {
 		return nil, err
 	}
-	rssPosts, rssErr := client.fetchRedditRSS(topic, sort)
-	if rssErr == nil {
-		return rssPosts, nil
-	}
-	return nil, fmt.Errorf("reddit rejected JSON (%v) and RSS fallback failed (%v). Reddit may be blocking this network or rate limiting unauthenticated requests. Try again later, set HFEEDS_REDDIT_USER_AGENT to a descriptive value, or run from another network; see README Reddit notes", err, rssErr)
-}
-
-func (client Client) fetchRedditJSON(topic string, sort string) ([]RedditPost, error) {
-	base, err := url.Parse(client.RedditBase)
+	body, err := client.redditAPI(http.MethodGet, strings.Join([]string{"r", topic, sort}, "/"), url.Values{
+		"limit":    []string{strconv.Itoa(limit)},
+		"raw_json": []string{"1"},
+	}, nil)
 	if err != nil {
 		return nil, err
 	}
-	base.Path = joinURLPath(base.Path, "r", topic, sort+".json")
-	req, err := http.NewRequest(http.MethodGet, base.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-	client.setRedditHeaders(req, "application/json")
-	body, err := client.do(req)
-	if err != nil {
-		return nil, err
-	}
-	var decoded redditResponse
+	var decoded redditListingResponse
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		return nil, err
 	}
 	posts := make([]RedditPost, 0, len(decoded.Data.Children))
 	for _, child := range decoded.Data.Children {
-		data := child.Data
-		posts = append(posts, RedditPost{
-			Title:   data.Title,
-			Content: data.Content,
-			Comment: data.Comment,
-			Link:    strings.TrimRight(client.RedditBase, "/") + data.Permalink,
-			Votes:   data.Votes,
-			Topic:   data.Topic,
-		})
+		post, err := client.decodeRedditPost(child)
+		if err != nil {
+			return nil, err
+		}
+		posts = append(posts, post)
 	}
 	return posts, nil
 }
 
-func (client Client) fetchRedditRSS(topic string, sort string) ([]RedditPost, error) {
-	base, err := url.Parse(client.RedditBase)
+func (client *Client) FetchRedditComments(topic string, postID string, limit int, depth int, sort string) (RedditDiscussion, error) {
+	if strings.TrimSpace(postID) == "" {
+		return RedditDiscussion{}, fmt.Errorf("--post is required")
+	}
+	if limit <= 0 {
+		return RedditDiscussion{}, fmt.Errorf("limit must be greater than 0")
+	}
+	if depth <= 0 {
+		return RedditDiscussion{}, fmt.Errorf("depth must be greater than 0")
+	}
+	if !ValidRedditCommentSort(sort) {
+		return RedditDiscussion{}, fmt.Errorf("comment sort must be confidence, top, new, controversial, old, or qa")
+	}
+	if err := client.validateRedditOAuthConfig(); err != nil {
+		return RedditDiscussion{}, err
+	}
+	body, err := client.redditAPI(http.MethodGet, strings.Join([]string{"r", topic, "comments", postID}, "/"), url.Values{
+		"limit":    []string{strconv.Itoa(limit)},
+		"depth":    []string{strconv.Itoa(depth)},
+		"sort":     []string{sort},
+		"raw_json": []string{"1"},
+	}, nil)
+	if err != nil {
+		return RedditDiscussion{}, err
+	}
+	var decoded redditListingArray
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return RedditDiscussion{}, err
+	}
+	if len(decoded) != 2 {
+		return RedditDiscussion{}, fmt.Errorf("reddit comments response must contain post and comment listings")
+	}
+	discussion := RedditDiscussion{}
+	if len(decoded[0].Data.Children) > 0 {
+		post, err := client.decodeRedditPost(decoded[0].Data.Children[0])
+		if err != nil {
+			return RedditDiscussion{}, err
+		}
+		discussion.Post = post
+	}
+	comments, err := client.decodeRedditComments(decoded[1].Data.Children)
+	if err != nil {
+		return RedditDiscussion{}, err
+	}
+	discussion.Comments = comments
+	return discussion, nil
+}
+
+func (client *Client) validateRedditOAuthConfig() error {
+	if strings.TrimSpace(client.RedditClientID) == "" || strings.TrimSpace(client.RedditDeviceID) == "" || strings.TrimSpace(client.RedditUserAgent) == "" {
+		return errMissingRedditOAuthConfig
+	}
+	return nil
+}
+
+func (client *Client) redditAPI(method string, path string, query url.Values, body io.Reader) ([]byte, error) {
+	token, err := client.redditAccessToken()
 	if err != nil {
 		return nil, err
 	}
-	base.Path = joinURLPath(base.Path, "r", topic, sort+".rss")
-	req, err := http.NewRequest(http.MethodGet, base.String(), nil)
+	base, err := url.Parse(client.RedditOAuthBase)
 	if err != nil {
 		return nil, err
 	}
-	client.setRedditHeaders(req, "application/atom+xml, application/rss+xml, text/xml")
+	base.Path = joinURLPath(base.Path, path)
+	base.RawQuery = query.Encode()
+	req, err := http.NewRequest(method, base.String(), body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+	req.Header.Set("User-Agent", client.RedditUserAgent)
+	req.Header.Set("Accept", "application/json")
+	response, err := client.do(req)
+	if err != nil {
+		return nil, redditActionableError("api", err)
+	}
+	return response, nil
+}
+
+func (client *Client) redditAccessToken() (redditToken, error) {
+	now := time.Now()
+	if client.Now != nil {
+		now = client.Now()
+	}
+	if client.redditToken.AccessToken != "" && now.Add(redditTokenRefreshSkew).Before(client.redditToken.ExpiresAt) {
+		return client.redditToken, nil
+	}
+	form := url.Values{}
+	form.Set("grant_type", redditInstalledGrant)
+	form.Set("device_id", client.RedditDeviceID)
+	req, err := http.NewRequest(http.MethodPost, client.RedditTokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return redditToken{}, err
+	}
+	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(client.RedditClientID+":")))
+	req.Header.Set("User-Agent", client.RedditUserAgent)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
 	body, err := client.do(req)
 	if err != nil {
-		return nil, err
+		return redditToken{}, redditActionableError("token", err)
 	}
-	var decoded redditAtomFeed
-	if err := xml.Unmarshal(body, &decoded); err != nil {
-		return nil, err
+	var decoded redditTokenResponse
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return redditToken{}, err
 	}
-	posts := make([]RedditPost, 0, len(decoded.Entries))
-	for _, entry := range decoded.Entries {
-		posts = append(posts, RedditPost{
-			Title:   strings.TrimSpace(entry.Title),
-			Content: plainRedditContent(entry.Content),
-			Link:    entry.Link.Href,
-			Topic:   redditEntryTopic(entry, topic),
-		})
+	if decoded.AccessToken == "" {
+		return redditToken{}, fmt.Errorf("reddit token response did not include access_token")
 	}
-	return posts, nil
+	if !strings.EqualFold(decoded.TokenType, "bearer") {
+		return redditToken{}, fmt.Errorf("reddit token response used unsupported token_type %q", decoded.TokenType)
+	}
+	client.redditToken = redditToken{
+		AccessToken: decoded.AccessToken,
+		TokenType:   decoded.TokenType,
+		ExpiresAt:   now.Add(time.Duration(decoded.ExpiresIn) * time.Second),
+	}
+	return client.redditToken, nil
 }
 
-func (client Client) setRedditHeaders(req *http.Request, accept string) {
-	req.Header.Set("User-Agent", valueOrDefault(client.RedditUserAgent, defaultRedditUserAgent))
-	req.Header.Set("Accept", accept)
-	req.Header.Set("Cache-Control", "no-cache")
+func (client *Client) decodeRedditPost(thing redditThing) (RedditPost, error) {
+	if thing.Kind != "t3" {
+		return RedditPost{}, fmt.Errorf("reddit listing included unsupported kind %q", thing.Kind)
+	}
+	var data redditPostData
+	if err := json.Unmarshal(thing.Data, &data); err != nil {
+		return RedditPost{}, err
+	}
+	permalink := absoluteRedditPermalink(client.RedditOAuthBase, data.Permalink)
+	return RedditPost{
+		ID:          data.ID,
+		Name:        data.Name,
+		Title:       data.Title,
+		Content:     data.SelfText,
+		URL:         data.URL,
+		Permalink:   permalink,
+		Subreddit:   data.Subreddit,
+		Author:      data.Author,
+		Score:       data.Score,
+		Ups:         data.Ups,
+		NumComments: data.NumComments,
+		CreatedUTC:  int64(data.CreatedUTC),
+		IsSelf:      data.IsSelf,
+		Domain:      data.Domain,
+		Comment:     data.NumComments,
+		Link:        permalink,
+		Votes:       data.Ups,
+		Topic:       data.Subreddit,
+	}, nil
 }
 
-func shouldFallbackToRedditRSS(err error) bool {
+func (client *Client) decodeRedditComments(things []redditThing) ([]RedditComment, error) {
+	comments := make([]RedditComment, 0, len(things))
+	for _, thing := range things {
+		comment, err := client.decodeRedditComment(thing)
+		if err != nil {
+			return nil, err
+		}
+		comments = append(comments, comment)
+	}
+	return comments, nil
+}
+
+func (client *Client) decodeRedditComment(thing redditThing) (RedditComment, error) {
+	var data redditCommentData
+	if err := json.Unmarshal(thing.Data, &data); err != nil {
+		return RedditComment{}, err
+	}
+	switch thing.Kind {
+	case "t1":
+		replies, err := client.decodeRedditReplies(data.Replies)
+		if err != nil {
+			return RedditComment{}, err
+		}
+		return RedditComment{
+			ID:         data.ID,
+			Name:       data.Name,
+			Author:     data.Author,
+			Body:       data.Body,
+			Score:      data.Score,
+			CreatedUTC: int64(data.CreatedUTC),
+			Permalink:  absoluteRedditPermalink(client.RedditOAuthBase, data.Permalink),
+			Replies:    replies,
+		}, nil
+	case "more":
+		return RedditComment{More: true, ID: data.ID, Name: data.Name, Count: data.Count}, nil
+	default:
+		return RedditComment{}, fmt.Errorf("reddit comments included unsupported kind %q", thing.Kind)
+	}
+}
+
+func (client *Client) decodeRedditReplies(raw json.RawMessage) ([]RedditComment, error) {
+	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte(`""`)) {
+		return nil, nil
+	}
+	var listing redditListingResponse
+	if err := json.Unmarshal(raw, &listing); err != nil {
+		return nil, err
+	}
+	return client.decodeRedditComments(listing.Data.Children)
+}
+
+func redditActionableError(context string, err error) error {
 	var reqErr requestError
 	if !errors.As(err, &reqErr) {
-		return false
+		return err
 	}
-	return reqErr.StatusCode == http.StatusForbidden || reqErr.StatusCode == http.StatusTooManyRequests
+	prefix := "reddit API request failed"
+	if context == "token" {
+		prefix = "reddit OAuth token request failed"
+	}
+	message := redditStatusMessage(reqErr.StatusCode)
+	if reqErr.RetryAfter != "" {
+		message += "; retry after " + reqErr.RetryAfter
+	}
+	if reqErr.Body != "" {
+		message += "; response: " + reqErr.Body
+	}
+	return fmt.Errorf("%s: %s", prefix, message)
 }
 
-func redditEntryTopic(entry redditAtomEntry, fallback string) string {
-	if len(entry.Categories) == 0 || strings.TrimSpace(entry.Categories[0].Term) == "" {
-		return fallback
+func redditStatusMessage(statusCode int) string {
+	switch statusCode {
+	case http.StatusBadRequest:
+		return "400 invalid grant/device ID/request"
+	case http.StatusUnauthorized:
+		return "401 invalid Reddit client ID/auth header/token"
+	case http.StatusForbidden:
+		return "403 Reddit API forbidden; check app setup/scopes/user-agent"
+	case http.StatusNotFound:
+		return "404 subreddit/post not found"
+	case http.StatusTooManyRequests:
+		return "429 rate limited"
+	default:
+		if statusCode >= 500 {
+			return fmt.Sprintf("%d Reddit server error", statusCode)
+		}
+		return fmt.Sprintf("request failed with status %d", statusCode)
 	}
-	return strings.TrimSpace(entry.Categories[0].Term)
 }
 
-func plainRedditContent(content string) string {
-	unescaped := html.UnescapeString(content)
-	withoutTags := htmlTagPattern.ReplaceAllString(unescaped, " ")
-	return strings.Join(strings.Fields(html.UnescapeString(withoutTags)), " ")
+func absoluteRedditPermalink(base string, permalink string) string {
+	if permalink == "" {
+		return ""
+	}
+	if strings.HasPrefix(permalink, "http://") || strings.HasPrefix(permalink, "https://") {
+		return permalink
+	}
+	parsed, err := url.Parse(base)
+	if err != nil {
+		panic("invalid reddit oauth base: " + err.Error())
+	}
+	return parsed.Scheme + "://www.reddit.com" + permalink
 }
