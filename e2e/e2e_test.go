@@ -184,7 +184,7 @@ func TestProductRedditV2EXE2E(t *testing.T) {
 		}
 	}))
 	defer redditServer.Close()
-	for _, args := range [][]string{{"reddit"}, {"reddit", "-t", "golang", "-s", "top"}, {"reddit", "-s", "new"}, {"reddit", "-s", "best"}} {
+	for _, args := range [][]string{{"reddit"}, {"reddit", "-t", "golang"}} {
 		result = run(t, args, redditEnv(redditServer))
 		if result.code != 0 || !strings.Contains(result.stdout, "Reddit List") || strings.Contains(result.stdout, "Content:") {
 			t.Fatalf("reddit %v = %#v", args, result)
@@ -198,10 +198,6 @@ func TestProductRedditV2EXE2E(t *testing.T) {
 	result = run(t, []string{"reddit"}, append([]string{"HOME=" + home}, redditEnv(redditServer)...))
 	if result.code != 0 || !strings.Contains(result.stdout, "Reddit 帖子") || !strings.Contains(result.stdout, "投票: 0") || !strings.Contains(result.stdout, "话题: popular") {
 		t.Fatalf("reddit zh = %#v", result)
-	}
-	result = run(t, []string{"reddit", "-s", "bad"}, redditEnv(redditServer))
-	if result.code == 0 {
-		t.Fatalf("reddit invalid = %#v", result)
 	}
 
 	v2exServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -359,7 +355,7 @@ func TestErrorAndEmptyE2E(t *testing.T) {
 		http.Error(writer, "too many", http.StatusTooManyRequests)
 	}))
 	defer redditFailServer.Close()
-	result = run(t, []string{"reddit", "-s", "top"}, redditEnv(redditFailServer))
+	result = run(t, []string{"reddit"}, redditEnv(redditFailServer))
 	if result.code == 0 || !strings.Contains(result.stderr, "Reddit source unavailable without OAuth") {
 		t.Fatalf("reddit rate limited = %#v", result)
 	}

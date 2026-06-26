@@ -67,8 +67,8 @@ hfeeds config --lang en|zh
 hfeeds github [-s daily|weekly|monthly] [-l language]
 hfeeds news [-t top]
 hfeeds product [-c count] [-p past]
-hfeeds reddit [-t topic] [-s hot|new|top|best] [-c limit]
-hfeeds reddit comments --topic topic --post post_id [--limit n] [--depth n] [--sort confidence|top|new|controversial|old|qa]
+hfeeds reddit [-t topic] [-c limit]
+hfeeds reddit comments --topic topic --post post_id [--limit n] [--depth n]
 hfeeds v2ex [-n node]
 ```
 
@@ -79,8 +79,8 @@ hfeeds github
 hfeeds github --since weekly --lang go
 hfeeds news --top 5
 hfeeds product --count 5 --past 1
-hfeeds reddit --topic golang --sort top
-hfeeds reddit comments --topic golang --post abc123 --limit 10 --depth 2 --sort top
+hfeeds reddit --topic golang
+hfeeds reddit comments --topic golang --post abc123 --limit 10 --depth 2
 hfeeds v2ex --node programmer
 ```
 
@@ -118,12 +118,11 @@ Reddit does not require OAuth or Reddit app credentials. The CLI uses best-effor
 
 `hfeeds reddit` fetches listings from `https://www.reddit.com/r/{subreddit}/.rss?limit={n}` and prints post title, source label, post ID, subreddit, author, permalink, external URL where available, and content/selftext where available. If Reddit RSS is blocked, rate-limited, or invalid, it falls back to Arctic Shift posts search.
 
-`hfeeds reddit comments --topic golang --post abc123 --limit 10 --depth 2 --sort top` fetches discussions from `https://www.reddit.com/svc/shreddit/comments/r/{subreddit}/t3_{postID}` and prints post context plus nested comments. If Shreddit HTML is blocked, rate-limited, or cannot be parsed, it falls back to Arctic Shift comments search.
+`hfeeds reddit comments --topic golang --post abc123 --limit 10 --depth 2` fetches discussions from `https://www.reddit.com/svc/shreddit/comments/r/{subreddit}/t3_{postID}` and prints post context plus nested comments. If Shreddit HTML is blocked, rate-limited, or cannot be parsed, it falls back to Arctic Shift comments search.
 
 Limitations:
 
 - RSS listings do not reliably include score/upvotes or comment counts.
-- Reddit sort support is limited compared with the Reddit API.
 - Comments use Reddit web HTML partials and may break if Reddit changes markup.
 - Arctic Shift is a third-party fallback/enrichment source and may lag behind Reddit.
 

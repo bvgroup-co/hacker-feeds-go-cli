@@ -100,18 +100,7 @@ type arcticShiftComment struct {
 	CreatedUTC float64 `json:"created_utc"`
 }
 
-func ValidRedditSort(sort string) bool {
-	return sort == "hot" || sort == "new" || sort == "top" || sort == "best"
-}
-
-func ValidRedditCommentSort(sort string) bool {
-	return sort == "confidence" || sort == "top" || sort == "new" || sort == "controversial" || sort == "old" || sort == "qa"
-}
-
-func (client *Client) FetchReddit(topic string, sortValue string, limit int) ([]RedditPost, error) {
-	if !ValidRedditSort(sortValue) {
-		return nil, fmt.Errorf("sort must be hot, new, top, or best")
-	}
+func (client *Client) FetchReddit(topic string, limit int) ([]RedditPost, error) {
 	if limit <= 0 {
 		return nil, fmt.Errorf("limit must be greater than 0")
 	}
@@ -126,7 +115,7 @@ func (client *Client) FetchReddit(topic string, sortValue string, limit int) ([]
 	return nil, redditCombinedError(rssErr, arcticErr)
 }
 
-func (client *Client) FetchRedditComments(topic string, postID string, limit int, depth int, sortValue string) (RedditDiscussion, error) {
+func (client *Client) FetchRedditComments(topic string, postID string, limit int, depth int) (RedditDiscussion, error) {
 	if strings.TrimSpace(postID) == "" {
 		return RedditDiscussion{}, fmt.Errorf("--post is required")
 	}
@@ -135,9 +124,6 @@ func (client *Client) FetchRedditComments(topic string, postID string, limit int
 	}
 	if depth <= 0 {
 		return RedditDiscussion{}, fmt.Errorf("depth must be greater than 0")
-	}
-	if !ValidRedditCommentSort(sortValue) {
-		return RedditDiscussion{}, fmt.Errorf("comment sort must be confidence, top, new, controversial, old, or qa")
 	}
 	discussion, shredErr := client.fetchShredditComments(topic, postID, limit, depth)
 	if shredErr == nil {
@@ -363,34 +349,51 @@ func parseArcticShiftComments(body []byte) ([]RedditComment, error) {
 }
 
 func buildRedditCommentTree(flat []RedditComment) []RedditComment {
-	comments := make([]RedditComment, len(flat))
-	copy(comments, flat)
-	byName := make(map[string]*RedditComment, len(comments))
-	for index := range comments {
-		if comments[index].Name != "" {
-			byName[comments[index].Name] = &comments[index]
+	byName := make(map[string]int, len(flat))
+	for index := range flat {
+		if flat[index].Name != "" {
+			byName[flat[index].Name] = index
 		}
-		if comments[index].ID != "" {
-			byName[thingName("t1", comments[index].ID)] = &comments[index]
+		if flat[index].ID != "" {
+			byName[thingName("t1", flat[index].ID)] = index
 		}
 	}
-	childIndexes := make(map[int]bool, len(comments))
-	for index := range comments {
-		parentID := comments[index].ParentID
+	childrenByParent := make(map[int][]int, len(flat))
+	childIndexes := make(map[int]bool, len(flat))
+	for index := range flat {
+		parentID := flat[index].ParentID
 		if !strings.HasPrefix(parentID, "t1_") {
 			continue
 		}
-		parent := byName[parentID]
-		if parent == nil {
+		parentIndex, ok := byName[parentID]
+		if !ok {
 			continue
 		}
-		parent.Replies = append(parent.Replies, comments[index])
+		childrenByParent[parentIndex] = append(childrenByParent[parentIndex], index)
 		childIndexes[index] = true
 	}
-	roots := make([]RedditComment, 0, len(comments))
-	for index := range comments {
+	var build func(int, map[int]bool) RedditComment
+	build = func(index int, ancestors map[int]bool) RedditComment {
+		if ancestors[index] {
+			return flat[index]
+		}
+		nextAncestors := make(map[int]bool, len(ancestors)+1)
+		for ancestor := range ancestors {
+			nextAncestors[ancestor] = true
+		}
+		nextAncestors[index] = true
+		comment := flat[index]
+		comment.Replies = nil
+		for _, childIndex := range childrenByParent[index] {
+			comment.Replies = append(comment.Replies, build(childIndex, nextAncestors))
+		}
+		sortRedditComments(comment.Replies)
+		return comment
+	}
+	roots := make([]RedditComment, 0, len(flat))
+	for index := range flat {
 		if !childIndexes[index] {
-			roots = append(roots, comments[index])
+			roots = append(roots, build(index, nil))
 		}
 	}
 	sortRedditComments(roots)

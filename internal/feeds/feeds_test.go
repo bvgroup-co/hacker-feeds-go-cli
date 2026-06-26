@@ -130,7 +130,7 @@ func TestFetchRedditUsesRSSFirst(t *testing.T) {
 	}))
 	defer server.Close()
 
-	posts, err := (&Client{HTTP: server.Client(), RedditBase: server.URL, ArcticShiftBase: server.URL}).FetchReddit("golang", "top", 2)
+	posts, err := (&Client{HTTP: server.Client(), RedditBase: server.URL, ArcticShiftBase: server.URL}).FetchReddit("golang", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestFetchRedditFallsBackToArcticShiftPosts(t *testing.T) {
 	}))
 	defer server.Close()
 
-	posts, err := (&Client{HTTP: server.Client(), RedditBase: server.URL, ArcticShiftBase: server.URL}).FetchReddit("golang", "hot", 3)
+	posts, err := (&Client{HTTP: server.Client(), RedditBase: server.URL, ArcticShiftBase: server.URL}).FetchReddit("golang", 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestFetchRedditFallsBackOnInvalidRSS(t *testing.T) {
 	}))
 	defer server.Close()
 
-	posts, err := (&Client{HTTP: server.Client(), RedditBase: server.URL, ArcticShiftBase: server.URL}).FetchReddit("golang", "new", 1)
+	posts, err := (&Client{HTTP: server.Client(), RedditBase: server.URL, ArcticShiftBase: server.URL}).FetchReddit("golang", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +209,7 @@ func TestFetchRedditCommentsUsesShredditFirst(t *testing.T) {
 	}))
 	defer server.Close()
 
-	discussion, err := (&Client{HTTP: server.Client(), RedditBase: server.URL, ArcticShiftBase: server.URL}).FetchRedditComments("golang", "abc123", 10, 2, "top")
+	discussion, err := (&Client{HTTP: server.Client(), RedditBase: server.URL, ArcticShiftBase: server.URL}).FetchRedditComments("golang", "abc123", 10, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +246,7 @@ func TestFetchRedditCommentsFallsBackToArcticShift(t *testing.T) {
 	}))
 	defer server.Close()
 
-	discussion, err := (&Client{HTTP: server.Client(), RedditBase: server.URL, ArcticShiftBase: server.URL}).FetchRedditComments("golang", "abc123", 10, 2, "top")
+	discussion, err := (&Client{HTTP: server.Client(), RedditBase: server.URL, ArcticShiftBase: server.URL}).FetchRedditComments("golang", "abc123", 10, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,6 +258,22 @@ func TestFetchRedditCommentsFallsBackToArcticShift(t *testing.T) {
 	}
 	if discussion.Comments[0].Source != "arctic-shift" || discussion.Comments[0].Replies[0].ParentID != "t1_c1" {
 		t.Fatalf("comments = %#v", discussion.Comments)
+	}
+}
+
+func TestBuildRedditCommentTreePreservesMultipleLevels(t *testing.T) {
+	comments := buildRedditCommentTree([]RedditComment{
+		{ID: "c1", Name: "t1_c1", ParentID: "t3_abc", Body: "root", CreatedUTC: 1},
+		{ID: "c2", Name: "t1_c2", ParentID: "t1_c1", Body: "child", CreatedUTC: 2},
+		{ID: "c3", Name: "t1_c3", ParentID: "t1_c2", Body: "grandchild", CreatedUTC: 3},
+		{ID: "c4", Name: "t1_c4", ParentID: "t1_c3", Body: "great-grandchild", CreatedUTC: 4},
+	})
+	if len(comments) != 1 || len(comments[0].Replies) != 1 || len(comments[0].Replies[0].Replies) != 1 || len(comments[0].Replies[0].Replies[0].Replies) != 1 {
+		t.Fatalf("comments = %#v", comments)
+	}
+	leaf := comments[0].Replies[0].Replies[0].Replies[0]
+	if leaf.ID != "c4" || leaf.Body != "great-grandchild" {
+		t.Fatalf("leaf = %#v", leaf)
 	}
 }
 
@@ -280,10 +296,10 @@ func TestFetchRedditNoOAuthOrJSON(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{HTTP: server.Client(), RedditBase: server.URL, ArcticShiftBase: server.URL}
-	if _, err := client.FetchReddit("golang", "hot", 1); err != nil {
+	if _, err := client.FetchReddit("golang", 1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.FetchRedditComments("golang", "abc123", 10, 2, "top"); err != nil {
+	if _, err := client.FetchRedditComments("golang", "abc123", 10, 2); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Join(paths, ",") != "/r/golang/.rss,/svc/shreddit/comments/r/golang/t3_abc123" {
@@ -298,7 +314,7 @@ func TestFetchRedditAllSourcesUnavailable(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := (&Client{HTTP: server.Client(), RedditBase: server.URL, ArcticShiftBase: server.URL}).FetchReddit("golang", "hot", 1)
+	_, err := (&Client{HTTP: server.Client(), RedditBase: server.URL, ArcticShiftBase: server.URL}).FetchReddit("golang", 1)
 	if err == nil || !strings.Contains(err.Error(), "Reddit source unavailable without OAuth") || !strings.Contains(err.Error(), "retry after 30") {
 		t.Fatalf("err = %v", err)
 	}

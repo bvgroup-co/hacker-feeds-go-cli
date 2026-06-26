@@ -210,20 +210,16 @@ func (app App) reddit(args []string, labels i18n.Labels) error {
 	if len(args) > 0 && args[0] == "comments" {
 		return app.redditComments(args[1:], labels)
 	}
-	flags, err := parseStringFlags(args, map[string]string{"--topic": "popular", "--sort": "hot", "--limit": "10"}, flagSpec{Short: "-t", Long: "--topic"}, flagSpec{Short: "-s", Long: "--sort"}, flagSpec{Short: "-c", Long: "--limit"})
+	flags, err := parseStringFlags(args, map[string]string{"--topic": "popular", "--limit": "10"}, flagSpec{Short: "-t", Long: "--topic"}, flagSpec{Short: "-c", Long: "--limit"})
 	if err != nil {
 		return err
 	}
 	topic := flags["--topic"]
-	sort := flags["--sort"]
 	limit, err := feeds.ParsePositiveInt("--limit", flags["--limit"])
 	if err != nil {
 		return err
 	}
-	if !feeds.ValidRedditSort(sort) {
-		return errors.New("--sort must be hot, new, top, or best")
-	}
-	posts, err := app.client().FetchReddit(topic, sort, limit)
+	posts, err := app.client().FetchReddit(topic, limit)
 	if err != nil {
 		return err
 	}
@@ -236,7 +232,7 @@ func (app App) reddit(args []string, labels i18n.Labels) error {
 }
 
 func (app App) redditComments(args []string, labels i18n.Labels) error {
-	flags, err := parseStringFlags(args, map[string]string{"--topic": "popular", "--post": "", "--limit": "10", "--depth": "2", "--sort": "top"}, flagSpec{Short: "-t", Long: "--topic"}, flagSpec{Short: "-p", Long: "--post"}, flagSpec{Short: "-c", Long: "--limit"}, flagSpec{Short: "-d", Long: "--depth"}, flagSpec{Short: "-s", Long: "--sort"})
+	flags, err := parseStringFlags(args, map[string]string{"--topic": "popular", "--post": "", "--limit": "10", "--depth": "2"}, flagSpec{Short: "-t", Long: "--topic"}, flagSpec{Short: "-p", Long: "--post"}, flagSpec{Short: "-c", Long: "--limit"}, flagSpec{Short: "-d", Long: "--depth"})
 	if err != nil {
 		return err
 	}
@@ -248,11 +244,7 @@ func (app App) redditComments(args []string, labels i18n.Labels) error {
 	if err != nil {
 		return err
 	}
-	sort := flags["--sort"]
-	if !feeds.ValidRedditCommentSort(sort) {
-		return errors.New("--sort must be confidence, top, new, controversial, old, or qa")
-	}
-	discussion, err := app.client().FetchRedditComments(flags["--topic"], flags["--post"], limit, depth, sort)
+	discussion, err := app.client().FetchRedditComments(flags["--topic"], flags["--post"], limit, depth)
 	if err != nil {
 		return err
 	}
@@ -320,8 +312,8 @@ func (app App) printCommandHelp(writer io.Writer, command string) {
 	case "product":
 		fmt.Fprintln(writer, "Usage: hfeeds product [-c count] [-p past]")
 	case "reddit":
-		fmt.Fprintln(writer, "Usage: hfeeds reddit [-t topic] [-s hot|new|top|best] [-c limit]")
-		fmt.Fprintln(writer, "       hfeeds reddit comments --topic topic --post post_id [--limit n] [--depth n] [--sort confidence|top|new|controversial|old|qa]")
+		fmt.Fprintln(writer, "Usage: hfeeds reddit [-t topic] [-c limit]")
+		fmt.Fprintln(writer, "       hfeeds reddit comments --topic topic --post post_id [--limit n] [--depth n]")
 	case "v2ex":
 		fmt.Fprintln(writer, "Usage: hfeeds v2ex [-n node]")
 	default:
