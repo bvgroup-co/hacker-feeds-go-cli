@@ -19,17 +19,18 @@ type App struct {
 	Out        io.Writer
 	Err        io.Writer
 	Stdin      *os.File
-	Client     feeds.Client
+	Client     *feeds.Client
 	Now        func() time.Time
 	IsTerminal func(*os.File) bool
 }
 
 func New() App {
+	client := feeds.NewClientFromEnv(os.Getenv)
 	return App{
 		Out:        os.Stdout,
 		Err:        os.Stderr,
 		Stdin:      os.Stdin,
-		Client:     feeds.NewClientFromEnv(os.Getenv),
+		Client:     &client,
 		Now:        time.Now,
 		IsTerminal: isTerminal,
 	}
@@ -144,7 +145,7 @@ func (app App) github(args []string, labels i18n.Labels) error {
 	if !feeds.ValidSince(since) {
 		return errors.New("--since must be daily, weekly, or monthly")
 	}
-	items, err := app.Client.FetchGitHub(language, since)
+	items, err := app.client().FetchGitHub(language, since)
 	if err != nil {
 		return err
 	}
@@ -166,7 +167,7 @@ func (app App) news(args []string, labels i18n.Labels) error {
 	if err != nil {
 		return err
 	}
-	items, err := app.Client.FetchNews(top)
+	items, err := app.client().FetchNews(top)
 	if err != nil {
 		return err
 	}
@@ -193,7 +194,7 @@ func (app App) product(args []string, labels i18n.Labels) error {
 	if err != nil {
 		return err
 	}
-	products, err := app.Client.FetchProducts(count, past, app.Now())
+	products, err := app.client().FetchProducts(count, past, app.Now())
 	if err != nil {
 		return err
 	}
@@ -222,8 +223,7 @@ func (app App) reddit(args []string, labels i18n.Labels) error {
 	if !feeds.ValidRedditSort(sort) {
 		return errors.New("--sort must be hot, new, top, or best")
 	}
-	client := app.Client
-	posts, err := (&client).FetchReddit(topic, sort, limit)
+	posts, err := app.client().FetchReddit(topic, sort, limit)
 	if err != nil {
 		return err
 	}
@@ -252,8 +252,7 @@ func (app App) redditComments(args []string, labels i18n.Labels) error {
 	if !feeds.ValidRedditCommentSort(sort) {
 		return errors.New("--sort must be confidence, top, new, controversial, old, or qa")
 	}
-	client := app.Client
-	discussion, err := (&client).FetchRedditComments(flags["--topic"], flags["--post"], limit, depth, sort)
+	discussion, err := app.client().FetchRedditComments(flags["--topic"], flags["--post"], limit, depth, sort)
 	if err != nil {
 		return err
 	}
@@ -267,7 +266,7 @@ func (app App) v2ex(args []string, labels i18n.Labels) error {
 		return err
 	}
 	node := flags["--node"]
-	topics, err := app.Client.FetchV2EX(node)
+	topics, err := app.client().FetchV2EX(node)
 	if err != nil {
 		return err
 	}
@@ -277,6 +276,14 @@ func (app App) v2ex(args []string, labels i18n.Labels) error {
 	}
 	output.V2EX(app.Out, labels, topics)
 	return nil
+}
+
+func (app App) client() *feeds.Client {
+	if app.Client != nil {
+		return app.Client
+	}
+	client := feeds.NewClientFromEnv(os.Getenv)
+	return &client
 }
 
 func (app App) printHelp(writer io.Writer) {

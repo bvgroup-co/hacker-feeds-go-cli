@@ -268,10 +268,6 @@ func (client *Client) decodeRedditPost(thing redditThing) (RedditPost, error) {
 		CreatedUTC:  int64(data.CreatedUTC),
 		IsSelf:      data.IsSelf,
 		Domain:      data.Domain,
-		Comment:     data.NumComments,
-		Link:        permalink,
-		Votes:       data.Ups,
-		Topic:       data.Subreddit,
 	}, nil
 }
 

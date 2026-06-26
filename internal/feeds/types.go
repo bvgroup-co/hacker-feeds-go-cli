@@ -59,10 +59,6 @@ type RedditPost struct {
 	CreatedUTC  int64
 	IsSelf      bool
 	Domain      string
-	Comment     int
-	Link        string
-	Votes       int
-	Topic       string
 }
 
 type RedditDiscussion struct {

@@ -153,11 +153,11 @@ Set `NO_COLOR=1` in scripts/tests to keep output plain.
 Release automation runs when a semantic version tag is pushed:
 
 ```sh
-git tag v0.4.4
-git push origin v0.4.4
+git tag v0.5.0
+git push origin v0.5.0
 ```
 
-The first release after this change should be `v0.4.4`. Release builds inject the tag version with Go ldflags, so the `v0.4.4` binary reports `0.4.4` from `hfeeds --version`. Local development builds report `dev`.
+Choose the next unused semantic version tag for each release. Release builds inject the tag version with Go ldflags, so a `v0.5.0` binary reports `0.5.0` from `hfeeds --version`. Local development builds report `dev`.
 
 The release workflow uses GoReleaser to build and publish:
 
