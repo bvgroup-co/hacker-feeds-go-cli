@@ -1,80 +1,158 @@
 package feeds
 
 import (
-	"bytes"
-	"encoding/json"
-	"errors"
+	"encoding/xml"
 	"fmt"
+	"html"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
 
-type productRequest struct {
-	Query string `json:"query"`
+const (
+	defaultProductBase      = "https://www.producthunt.com/feed"
+	defaultProductUserAgent = "hacker-feeds-go-cli/dev (+https://github.com/bvgroup-co/hacker-feeds-go-cli)"
+	productHuntFeedSource   = "producthunt-feed"
+)
+
+var (
+	productHTMLTagPattern = regexp.MustCompile(`<[^>]*>`)
+	productParagraphRegex = regexp.MustCompile(`(?is)<p\b[^>]*>(.*?)</p>`)
+	productLinkRegex      = regexp.MustCompile(`(?is)<a\b([^>]*)>(.*?)</a>`)
+)
+
+type productAtomFeed struct {
+	XMLName xml.Name           `xml:"feed"`
+	Entries []productAtomEntry `xml:"entry"`
 }
 
-type productResponse struct {
-	Data struct {
-		Posts struct {
-			Edges []struct {
-				Node struct {
-					Name        string `json:"name"`
-					Description string `json:"description"`
-					URL         string `json:"url"`
-					Website     string `json:"website"`
-					Votes       int    `json:"votesCount"`
-				} `json:"node"`
-			} `json:"edges"`
-		} `json:"posts"`
-	} `json:"data"`
-	Errors []struct {
-		Message string `json:"message"`
-	} `json:"errors"`
+type productAtomEntry struct {
+	Title     string            `xml:"title"`
+	Published string            `xml:"published"`
+	Links     []productAtomLink `xml:"link"`
+	Content   struct {
+		Body string `xml:",innerxml"`
+	} `xml:"content"`
+}
+
+type productAtomLink struct {
+	Rel  string `xml:"rel,attr"`
+	Href string `xml:"href,attr"`
 }
 
 func (client Client) FetchProducts(count int, past int, now time.Time) ([]Product, error) {
-	if client.ProductToken == "" {
-		return nil, errors.New("PRODUCT_HUNT_ACCESS_TOKEN is required")
+	if count <= 0 {
+		return nil, fmt.Errorf("count must be greater than 0")
 	}
-	postedAfter := now.AddDate(0, 0, -past).Format(time.DateOnly)
-	postedBefore := now.AddDate(0, 0, 1).Format(time.DateOnly)
-	query := fmt.Sprintf(`query { posts(first: %d, order: VOTES, postedAfter: "%s", postedBefore: "%s") { edges{ cursor node{ id name tagline description url votesCount thumbnail{ type url } website reviewsRating }}}}`, count, postedAfter, postedBefore)
-	encoded, err := json.Marshal(productRequest{Query: query})
+	if past < 0 {
+		return nil, fmt.Errorf("past must be non-negative")
+	}
+	req, err := http.NewRequest(http.MethodGet, client.ProductBase, nil)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequest(http.MethodPost, client.ProductBase, bytes.NewReader(encoded))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+client.ProductToken)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/atom+xml, application/xml, text/xml")
+	req.Header.Set("User-Agent", client.productUserAgent())
 	body, err := client.do(req)
 	if err != nil {
 		return nil, err
 	}
-	var decoded productResponse
-	if err := json.Unmarshal(body, &decoded); err != nil {
+	products, err := parseProductAtom(body, past, now)
+	if err != nil {
 		return nil, err
 	}
-	if len(decoded.Errors) > 0 {
-		return nil, errors.New(decoded.Errors[0].Message)
+	if len(products) > count {
+		return products[:count], nil
 	}
-	products := make([]Product, 0, len(decoded.Data.Posts.Edges))
-	for _, edge := range decoded.Data.Posts.Edges {
-		node := edge.Node
+	return products, nil
+}
+
+func parseProductAtom(body []byte, past int, now time.Time) ([]Product, error) {
+	var feed productAtomFeed
+	if err := xml.Unmarshal(body, &feed); err != nil {
+		return nil, err
+	}
+	products := make([]Product, 0, len(feed.Entries))
+	for _, entry := range feed.Entries {
+		if !productPublishedWithinPast(entry.Published, past, now) {
+			continue
+		}
 		products = append(products, Product{
-			Name:        node.Name,
-			Description: node.Description,
-			URL:         stripQuery(node.URL),
-			Website:     stripQuery(node.Website),
-			Votes:       node.Votes,
+			Name:        strings.TrimSpace(html.UnescapeString(entry.Title)),
+			Description: firstProductParagraph(entry.Content.Body),
+			URL:         stripQuery(productAlternateURL(entry.Links)),
+			Website:     stripQuery(productWebsiteURL(entry.Content.Body)),
+			VotesKnown:  false,
+			Source:      productHuntFeedSource,
 		})
 	}
 	return products, nil
+}
+
+func productPublishedWithinPast(published string, past int, now time.Time) bool {
+	if past == 0 {
+		return true
+	}
+	publishedAt, err := time.Parse(time.RFC3339, strings.TrimSpace(published))
+	if err != nil {
+		return true
+	}
+	start := now.AddDate(0, 0, -past)
+	end := now.AddDate(0, 0, 1)
+	return !publishedAt.Before(start) && publishedAt.Before(end)
+}
+
+func productAlternateURL(links []productAtomLink) string {
+	for _, link := range links {
+		if strings.TrimSpace(link.Rel) == "alternate" && strings.TrimSpace(link.Href) != "" {
+			return strings.TrimSpace(link.Href)
+		}
+	}
+	for _, link := range links {
+		if strings.TrimSpace(link.Href) != "" {
+			return strings.TrimSpace(link.Href)
+		}
+	}
+	return ""
+}
+
+func firstProductParagraph(content string) string {
+	decoded := html.UnescapeString(content)
+	match := productParagraphRegex.FindStringSubmatch(decoded)
+	if len(match) != 0 {
+		return plainProductHTML(match[1])
+	}
+	match = productParagraphRegex.FindStringSubmatch(content)
+	if len(match) == 0 {
+		return plainProductHTML(content)
+	}
+	return plainProductHTML(match[1])
+}
+
+func productWebsiteURL(content string) string {
+	decoded := html.UnescapeString(content)
+	for _, match := range productLinkRegex.FindAllStringSubmatch(decoded, -1) {
+		if len(match) < 3 {
+			continue
+		}
+		label := strings.ToLower(plainProductHTML(match[2]))
+		if label != "link" && label != "website" {
+			continue
+		}
+		attrs := parseHTMLAttrs(match[1])
+		if href := strings.TrimSpace(attrs["href"]); href != "" {
+			return href
+		}
+	}
+	return ""
+}
+
+func plainProductHTML(content string) string {
+	unescaped := html.UnescapeString(content)
+	withoutTags := productHTMLTagPattern.ReplaceAllString(unescaped, " ")
+	return strings.Join(strings.Fields(html.UnescapeString(withoutTags)), " ")
 }
 
 func stripQuery(value string) string {
@@ -85,4 +163,8 @@ func stripQuery(value string) string {
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 	return parsed.String()
+}
+
+func (client Client) productUserAgent() string {
+	return valueOrDefault(client.ProductUserAgent, defaultProductUserAgent)
 }

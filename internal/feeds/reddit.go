@@ -1,6 +1,7 @@
 package feeds
 
 import (
+	"bytes"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
@@ -22,13 +23,13 @@ const (
 	redditRSSSource          = "reddit-rss"
 	redditShredditSource     = "reddit-shreddit"
 	redditArcticShiftSource  = "arctic-shift"
-	redditUnavailableMessage = "Reddit source unavailable without OAuth. Tried reddit-rss/reddit-shreddit and arctic-shift fallback."
+	redditUnavailableMessage = "Reddit source unavailable without OAuth. Tried reddit-rss/arctic-shift and reddit-shreddit fallback."
 )
 
 var (
 	redditHTMLTagPattern       = regexp.MustCompile(`<[^>]*>`)
 	redditThingIDPattern       = regexp.MustCompile(`\bt3_[A-Za-z0-9]+\b`)
-	redditShredditCommentRegex = regexp.MustCompile(`(?is)<shreddit-comment\b([^>]*)>(.*?)</shreddit-comment>`)
+	redditShredditCommentRegex = regexp.MustCompile(`(?is)<shreddit-comment\s+([^>]*)>(.*?)</shreddit-comment>`)
 	redditSlotCommentRegex     = regexp.MustCompile(`(?is)<[^>]*\bslot=["']comment["'][^>]*>(.*?)</[^>]+>`)
 	redditAttrRegex            = regexp.MustCompile(`(?is)([A-Za-z_:][-A-Za-z0-9_:]*)\s*=\s*("([^"]*)"|'([^']*)')`)
 )
@@ -85,7 +86,7 @@ type arcticShiftPost struct {
 }
 
 type arcticShiftCommentsResponse struct {
-	Data []arcticShiftComment `json:"data"`
+	Data []arcticShiftTreeNode `json:"data"`
 }
 
 type arcticShiftComment struct {
@@ -98,6 +99,48 @@ type arcticShiftComment struct {
 	Score      int     `json:"score"`
 	Permalink  string  `json:"permalink"`
 	CreatedUTC float64 `json:"created_utc"`
+}
+
+type arcticShiftTreeNode struct {
+	Kind string                 `json:"kind"`
+	Data arcticShiftCommentData `json:"data"`
+}
+
+type arcticShiftCommentData struct {
+	ID         string             `json:"id"`
+	Name       string             `json:"name"`
+	LinkID     string             `json:"link_id"`
+	ParentID   string             `json:"parent_id"`
+	Author     string             `json:"author"`
+	Body       string             `json:"body"`
+	Score      int                `json:"score"`
+	Permalink  string             `json:"permalink"`
+	CreatedUTC float64            `json:"created_utc"`
+	Replies    arcticShiftReplies `json:"replies"`
+	Count      int                `json:"count"`
+	Children   []string           `json:"children"`
+}
+
+type arcticShiftReplies struct {
+	Nodes []arcticShiftTreeNode
+}
+
+func (replies *arcticShiftReplies) UnmarshalJSON(body []byte) error {
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" || trimmed == `""` || trimmed == "null" {
+		return nil
+	}
+	var listing struct {
+		Kind string `json:"kind"`
+		Data struct {
+			Children []arcticShiftTreeNode `json:"children"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &listing); err != nil {
+		return err
+	}
+	replies.Nodes = listing.Data.Children
+	return nil
 }
 
 func (client *Client) FetchReddit(topic string, limit int) ([]RedditPost, error) {
@@ -125,15 +168,15 @@ func (client *Client) FetchRedditComments(topic string, postID string, limit int
 	if depth <= 0 {
 		return RedditDiscussion{}, fmt.Errorf("depth must be greater than 0")
 	}
+	discussion, arcticErr := client.fetchArcticShiftComments(topic, postID, limit, depth)
+	if arcticErr == nil {
+		return discussion, nil
+	}
 	discussion, shredErr := client.fetchShredditComments(topic, postID, limit, depth)
 	if shredErr == nil {
 		return discussion, nil
 	}
-	discussion, arcticErr := client.fetchArcticShiftComments(topic, postID, limit)
-	if arcticErr == nil {
-		return discussion, nil
-	}
-	return RedditDiscussion{}, redditCombinedError(shredErr, arcticErr)
+	return RedditDiscussion{}, redditCombinedError(arcticErr, shredErr)
 }
 
 func (client *Client) fetchRedditRSS(topic string, limit int) ([]RedditPost, error) {
@@ -213,13 +256,18 @@ func (client *Client) fetchShredditComments(topic string, postID string, limit i
 	return RedditDiscussion{Post: RedditPost{ID: trimThingPrefix(postID), Name: fullPostID(postID), Subreddit: topic, Source: redditShredditSource}, Comments: comments}, nil
 }
 
-func (client *Client) fetchArcticShiftComments(topic string, postID string, limit int) (RedditDiscussion, error) {
+func (client *Client) fetchArcticShiftComments(topic string, postID string, limit int, depth int) (RedditDiscussion, error) {
 	base, err := url.Parse(client.ArcticShiftBase)
 	if err != nil {
 		return RedditDiscussion{}, err
 	}
-	base.Path = joinURLPath(base.Path, "api", "comments", "search")
-	base.RawQuery = url.Values{"link_id": []string{fullPostID(postID)}, "limit": []string{strconv.Itoa(limit)}}.Encode()
+	base.Path = joinURLPath(base.Path, "api", "comments", "tree")
+	base.RawQuery = url.Values{
+		"link_id":       []string{fullPostID(postID)},
+		"limit":         []string{strconv.Itoa(limit)},
+		"start_breadth": []string{strconv.Itoa(limit)},
+		"start_depth":   []string{strconv.Itoa(depth)},
+	}.Encode()
 	req, err := http.NewRequest(http.MethodGet, base.String(), nil)
 	if err != nil {
 		return RedditDiscussion{}, err
@@ -303,13 +351,23 @@ func parseShredditComments(body []byte) ([]RedditComment, error) {
 	if len(matches) == 0 {
 		return nil, fmt.Errorf("reddit-shreddit response did not contain comments")
 	}
+	if len(matches) != bytes.Count(body, []byte("<shreddit-comment ")) {
+		return nil, fmt.Errorf("reddit-shreddit response contains ambiguous nested comment markup")
+	}
 	comments := make([]RedditComment, 0, len(matches))
 	for _, match := range matches {
 		attrs := parseHTMLAttrs(string(match[1]))
+		if strings.Contains(string(match[2]), "<shreddit-comment") {
+			return nil, fmt.Errorf("reddit-shreddit response contains ambiguous nested comment markup")
+		}
 		bodyText := shredCommentBody(match[2])
+		name := firstAttr(attrs, "thingid", "thing-id")
+		if name == "" || firstAttr(attrs, "author") == "" || bodyText == "" {
+			return nil, fmt.Errorf("reddit-shreddit response contains incomplete comment markup")
+		}
 		comments = append(comments, RedditComment{
-			ID:         trimThingPrefix(firstAttr(attrs, "thingid", "thing-id")),
-			Name:       firstAttr(attrs, "thingid", "thing-id"),
+			ID:         trimThingPrefix(name),
+			Name:       name,
 			ParentID:   firstAttr(attrs, "parentid", "parent-id"),
 			PostID:     firstAttr(attrs, "postid", "post-id"),
 			Author:     firstAttr(attrs, "author"),
@@ -330,22 +388,41 @@ func parseArcticShiftComments(body []byte) ([]RedditComment, error) {
 		return nil, err
 	}
 	comments := make([]RedditComment, 0, len(decoded.Data))
-	for _, item := range decoded.Data {
-		commentID := trimThingPrefix(valueOrDefault(item.ID, item.Name))
-		comments = append(comments, RedditComment{
-			ID:         commentID,
-			Name:       thingName("t1", commentID),
-			ParentID:   item.ParentID,
-			PostID:     item.LinkID,
-			Author:     item.Author,
-			Body:       item.Body,
-			Score:      item.Score,
-			CreatedUTC: int64(item.CreatedUTC),
-			Permalink:  absoluteRedditPermalink(item.Permalink),
-			Source:     redditArcticShiftSource,
-		})
+	for _, node := range decoded.Data {
+		comments = append(comments, arcticShiftTreeComment(node, 0))
 	}
-	return buildRedditCommentTree(comments), nil
+	return comments, nil
+}
+
+func arcticShiftTreeComment(node arcticShiftTreeNode, depth int) RedditComment {
+	data := node.Data
+	commentID := trimThingPrefix(valueOrDefault(data.ID, data.Name))
+	commentName := strings.TrimSpace(data.Name)
+	if commentName == "" {
+		commentName = thingName("t1", commentID)
+	}
+	comment := RedditComment{
+		ID:         commentID,
+		Name:       commentName,
+		ParentID:   data.ParentID,
+		PostID:     data.LinkID,
+		Author:     data.Author,
+		Body:       data.Body,
+		Score:      data.Score,
+		CreatedUTC: int64(data.CreatedUTC),
+		Permalink:  absoluteRedditPermalink(data.Permalink),
+		Depth:      depth,
+		Source:     redditArcticShiftSource,
+		More:       node.Kind == "more",
+		Count:      data.Count,
+	}
+	if comment.More && comment.Count == 0 {
+		comment.Count = len(data.Children)
+	}
+	for _, child := range data.Replies.Nodes {
+		comment.Replies = append(comment.Replies, arcticShiftTreeComment(child, depth+1))
+	}
+	return comment
 }
 
 func buildRedditCommentTree(flat []RedditComment) []RedditComment {

@@ -107,11 +107,7 @@ Running `hfeeds config` without `--lang` in a non-interactive environment exits 
 
 ## Environment variables
 
-Product Hunt requires an access token:
-
-```sh
-export PRODUCT_HUNT_ACCESS_TOKEN=your-token
-```
+Product Hunt uses the public Atom feed at `https://www.producthunt.com/feed` and does not require credentials. Votes are not available from the public feed, so the CLI marks them as unavailable instead of printing a misleading count.
 
 ### Hacker News access
 
@@ -126,22 +122,22 @@ Hacker News uses the public Firebase API and does not require credentials. The d
 Reddit does not require OAuth or Reddit app credentials. The CLI uses best-effort public/web sources:
 
 - Listings: Reddit Atom/RSS first, then Arctic Shift as a fallback.
-- Comments: Reddit Shreddit comments HTML first, then Arctic Shift as a fallback.
+- Comments: Arctic Shift comment tree first, then Reddit Shreddit comments HTML as a fallback.
 
 `hfeeds reddit` fetches listings from `https://www.reddit.com/r/{subreddit}/.rss?limit={n}` and prints post title, source label, post ID, subreddit, author, permalink, external URL where available, and content/selftext where available. If Reddit RSS is blocked, rate-limited, or invalid, it falls back to Arctic Shift posts search.
 
-`hfeeds reddit comments --topic golang --post abc123 --limit 10 --depth 2` fetches discussions from `https://www.reddit.com/svc/shreddit/comments/r/{subreddit}/t3_{postID}` and prints post context plus nested comments. If Shreddit HTML is blocked, rate-limited, or cannot be parsed, it falls back to Arctic Shift comments search.
+`hfeeds reddit comments --topic golang --post abc123 --limit 10 --depth 2` fetches discussions from `https://arctic-shift.photon-reddit.com/api/comments/tree?link_id=t3_{postID}&limit={limit}&start_breadth={limit}&start_depth={depth}` and prints post context plus nested comments. If Arctic Shift is blocked, rate-limited, or cannot be parsed, it falls back to Reddit Shreddit HTML.
 
 Limitations:
 
 - RSS listings do not reliably include score/upvotes or comment counts.
-- Comments use Reddit web HTML partials and may break if Reddit changes markup.
-- Arctic Shift is a third-party fallback/enrichment source and may lag behind Reddit.
+- Arctic Shift is a third-party source and may lag behind Reddit.
+- Fallback comments use Reddit web HTML partials and may break if Reddit changes markup.
 
 If all no-OAuth sources fail, the command reports:
 
 ```text
-Reddit source unavailable without OAuth. Tried reddit-rss/reddit-shreddit and arctic-shift fallback.
+Reddit source unavailable without OAuth. Tried reddit-rss/arctic-shift and reddit-shreddit fallback.
 ```
 
 The CLI does not use Reddit OAuth endpoints, Reddit app credentials, or unauthenticated Reddit `.json` endpoints.
@@ -151,7 +147,7 @@ The HTTP base URLs can be overridden for tests:
 ```sh
 HFEEDS_GITHUB_BASE_URL=http://127.0.0.1:8080
 HFEEDS_HN_BASE_URL=http://127.0.0.1:8081
-HFEEDS_PRODUCT_HUNT_BASE_URL=http://127.0.0.1:8082/graphql
+HFEEDS_PRODUCT_HUNT_BASE_URL=http://127.0.0.1:8082/feed
 HFEEDS_REDDIT_BASE_URL=http://127.0.0.1:8083
 HFEEDS_ARCTIC_SHIFT_BASE_URL=http://127.0.0.1:8084
 HFEEDS_V2EX_BASE_URL=http://127.0.0.1:8084

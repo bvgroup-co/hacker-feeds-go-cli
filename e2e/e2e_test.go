@@ -176,30 +176,28 @@ func TestNewsE2E(t *testing.T) {
 
 func TestProductRedditV2EXE2E(t *testing.T) {
 	productServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Header.Get("Authorization") != "Bearer token" {
-			t.Fatalf("missing token")
+		if request.Header.Get("Authorization") != "" {
+			t.Fatalf("authorization = %s", request.Header.Get("Authorization"))
 		}
-		_, _ = writer.Write([]byte(`{"data":{"posts":{"edges":[{"node":{"name":"Prod","description":"Desc","url":"https://p.example/path?ref=x","website":"https://w.example/?a=b","votesCount":5}}]}}}`))
+		_, _ = writer.Write([]byte(productE2EAtom()))
 	}))
 	defer productServer.Close()
-	result := run(t, []string{"product", "-c", "2", "-p", "1"}, []string{"HFEEDS_PRODUCT_HUNT_BASE_URL=" + productServer.URL, "PRODUCT_HUNT_ACCESS_TOKEN=token"})
-	if result.code != 0 || !strings.Contains(result.stdout, "Product Hunt List") || !strings.Contains(result.stdout, "Votes: 5") || strings.Contains(result.stdout, "?ref=x") {
+	result := run(t, []string{"product", "-c", "2", "-p", "1"}, []string{"HFEEDS_PRODUCT_HUNT_BASE_URL=" + productServer.URL})
+	if result.code != 0 || !strings.Contains(result.stdout, "Product Hunt List") || !strings.Contains(result.stdout, "Votes: unavailable from public feed") || strings.Contains(result.stdout, "?ref=x") {
 		t.Fatalf("product = %#v", result)
 	}
 	home := writeLang(t, "zh")
-	result = run(t, []string{"product"}, []string{"HOME=" + home, "HFEEDS_PRODUCT_HUNT_BASE_URL=" + productServer.URL, "PRODUCT_HUNT_ACCESS_TOKEN=token"})
-	if result.code != 0 || !strings.Contains(result.stdout, "Product Hunt 榜单") || !strings.Contains(result.stdout, "投票: 5") {
+	result = run(t, []string{"product"}, []string{"HOME=" + home, "HFEEDS_PRODUCT_HUNT_BASE_URL=" + productServer.URL})
+	if result.code != 0 || !strings.Contains(result.stdout, "Product Hunt 榜单") || !strings.Contains(result.stdout, "投票: unavailable from public feed") {
 		t.Fatalf("product zh = %#v", result)
-	}
-	result = run(t, []string{"product"}, []string{"HFEEDS_PRODUCT_HUNT_BASE_URL=" + productServer.URL})
-	if result.code == 0 || !strings.Contains(result.stderr, "PRODUCT_HUNT_ACCESS_TOKEN") {
-		t.Fatalf("product token = %#v", result)
 	}
 
 	redditServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/r/popular/.rss", "/r/golang/.rss":
 			_, _ = writer.Write([]byte(redditE2ERSS()))
+		case "/api/comments/tree":
+			_, _ = writer.Write([]byte(redditE2EArcticTree()))
 		case "/svc/shreddit/comments/r/golang/t3_1":
 			_, _ = writer.Write([]byte(redditE2EShreddit()))
 		default:
@@ -350,7 +348,7 @@ func TestErrorAndEmptyE2E(t *testing.T) {
 	}))
 	defer productServer.Close()
 	for _, args := range [][]string{{"product", "-c", "0"}, {"product", "-p", "-1"}} {
-		result = run(t, args, []string{"HFEEDS_PRODUCT_HUNT_BASE_URL=" + productServer.URL + "/empty", "PRODUCT_HUNT_ACCESS_TOKEN=token"})
+		result = run(t, args, []string{"HFEEDS_PRODUCT_HUNT_BASE_URL=" + productServer.URL + "/empty"})
 		if result.code == 0 {
 			t.Fatalf("product invalid %v = %#v", args, result)
 		}
@@ -423,6 +421,14 @@ func redditEnv(server *httptest.Server) []string {
 
 func redditE2ERSS() string {
 	return `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>/r/popular</title><category term="popular"></category><entry><id>https://www.reddit.com/r/popular/comments/t3_1/post/</id><title>Post</title><author><name>alice</name></author><link href="https://www.reddit.com/r/popular/comments/1/post/" /><content type="html"></content><category term="popular"></category></entry></feed>`
+}
+
+func productE2EAtom() string {
+	return `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><entry><title>Prod</title><published>2026-06-27T08:00:00Z</published><link rel="alternate" href="https://p.example/path?ref=x" /><content type="html">&lt;p&gt;Desc&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://w.example/?a=b&quot;&gt;Link&lt;/a&gt;&lt;/p&gt;</content></entry></feed>`
+}
+
+func redditE2EArcticTree() string {
+	return `{"data":[{"kind":"t1","data":{"id":"c1","name":"t1_c1","link_id":"t3_1","parent_id":"t3_1","author":"bob","body":"Comment body","score":5,"permalink":"/r/golang/comments/1/comment/c1/","created_utc":1770000000,"replies":""}}]}`
 }
 
 func redditE2EShreddit() string {
