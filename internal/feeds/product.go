@@ -315,8 +315,10 @@ func applyProductDataMap(details *ProductDetails, data map[string]any) {
 	fillString(&details.PublishedAt, stringValue(data["scheduledAt"]))
 	fillString(&details.UpdatedAt, stringValue(data["updatedAt"]))
 	if boolValue(data["hideVotesCount"]) {
-		details.VotesKnown = false
-		details.Votes = 0
+		markProductVotesHidden(details)
+		return
+	}
+	if details.VotesHidden {
 		return
 	}
 	votes := 0
@@ -330,8 +332,8 @@ func applyProductObject(details *ProductDetails, product map[string]any) {
 	fillString(&details.Name, stringValue(product["name"]))
 	fillString(&details.Slug, stringValue(product["slug"]))
 	fillString(&details.WebsiteURL, stringValue(product["websiteUrl"]))
-	fillString(&details.CleanDomain, stringValue(product["cleanUrl"]))
-	fillString(&details.CleanDomain, stringValue(product["cleanDomain"]))
+	fillString(&details.CleanDomain, productCleanDomain(stringValue(product["cleanUrl"])))
+	fillString(&details.CleanDomain, productCleanDomain(stringValue(product["cleanDomain"])))
 }
 
 func applyProductLaunch(details *ProductDetails, launch map[string]any) {
@@ -343,8 +345,10 @@ func applyProductLaunch(details *ProductDetails, launch map[string]any) {
 	fillString(&details.PublishedAt, stringValue(launch["featuredAt"]))
 	fillString(&details.PublishedAt, stringValue(launch["scheduledAt"]))
 	if boolValue(launch["hideVotesCount"]) {
-		details.VotesKnown = false
-		details.Votes = 0
+		markProductVotesHidden(details)
+		return
+	}
+	if details.VotesHidden {
 		return
 	}
 	votes := 0
@@ -352,6 +356,12 @@ func applyProductLaunch(details *ProductDetails, launch map[string]any) {
 		details.Votes = votes
 		details.VotesKnown = true
 	}
+}
+
+func markProductVotesHidden(details *ProductDetails) {
+	details.VotesHidden = true
+	details.VotesKnown = false
+	details.Votes = 0
 }
 
 func applyProductMakers(details *ProductDetails, makers []any) {
@@ -723,11 +733,26 @@ func absoluteProductURL(value string, base string) string {
 }
 
 func cleanDomain(value string) string {
-	parsed, err := url.Parse(value)
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	parsed, err := url.Parse(trimmed)
 	if err != nil {
 		return ""
 	}
 	return strings.TrimPrefix(parsed.Hostname(), "www.")
+}
+
+func productCleanDomain(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.Contains(trimmed, "://") {
+		return cleanDomain(trimmed)
+	}
+	return cleanDomain("https://" + trimmed)
 }
 
 func pathSegments(path string) []string {

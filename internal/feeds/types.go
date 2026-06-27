@@ -81,6 +81,7 @@ type ProductDetails struct {
 	Media          []ProductMedia
 	Votes          int
 	VotesKnown     bool
+	VotesHidden    bool
 	CommentsCount  int
 	ReviewsCount   int
 	ReviewsRating  float64

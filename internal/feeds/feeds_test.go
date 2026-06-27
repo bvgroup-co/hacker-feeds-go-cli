@@ -571,7 +571,23 @@ func TestParseProductDetailsJSONLDAndEmbeddedData(t *testing.T) {
 func TestParseProductDetailsHiddenVotes(t *testing.T) {
 	html := `<html><script>self.__next_f.push([1,{"product":{"name":"Hidden","slug":"hidden"},"launch":{"hideVotesCount":true,"latestScore":99}}])</script></html>`
 	details := parseProductDetailsPage([]byte(html), "https://www.producthunt.com", "hidden")
-	if details.VotesKnown || details.Votes != 0 {
+	if !details.VotesHidden || details.VotesKnown || details.Votes != 0 {
+		t.Fatalf("details = %#v", details)
+	}
+}
+
+func TestParseProductDetailsHiddenVotesDominateNestedScores(t *testing.T) {
+	html := `<html><script>self.__next_f.push([1,{"hideVotesCount":true,"launch":{"latestScore":99},"product":{"name":"Hidden","slug":"hidden"}}])</script></html>`
+	details := parseProductDetailsPage([]byte(html), "https://www.producthunt.com", "hidden")
+	if !details.VotesHidden || details.VotesKnown || details.Votes != 0 {
+		t.Fatalf("details = %#v", details)
+	}
+}
+
+func TestParseProductDetailsNormalizesPathCleanURL(t *testing.T) {
+	html := `<html><script>self.__next_f.push([1,{"product":{"name":"Support","slug":"support","websiteUrl":"https://support.claude.com/en/articles/1","cleanUrl":"support.claude.com/en/articles/1"}}])</script></html>`
+	details := parseProductDetailsPage([]byte(html), "https://www.producthunt.com", "support")
+	if details.CleanDomain != "support.claude.com" {
 		t.Fatalf("details = %#v", details)
 	}
 }
