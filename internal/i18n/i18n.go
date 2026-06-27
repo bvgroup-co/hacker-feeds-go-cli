@@ -31,12 +31,13 @@ type NewsLabels struct {
 }
 
 type ProductLabels struct {
-	Header      string
-	Name        string
-	Description string
-	ProductURL  string
-	Website     string
-	Votes       string
+	Header        string
+	DetailsHeader string
+	Name          string
+	Description   string
+	ProductURL    string
+	Website       string
+	Votes         string
 }
 
 type ForumLabels struct {
@@ -104,12 +105,13 @@ var en = Labels{
 		URL:              "URL",
 	},
 	Product: ProductLabels{
-		Header:      "Product Hunt List",
-		Name:        "Name",
-		Description: "Description",
-		ProductURL:  "Product URL",
-		Website:     "Website",
-		Votes:       "Votes",
+		Header:        "Product Hunt List",
+		DetailsHeader: "Product Hunt Details",
+		Name:          "Name",
+		Description:   "Description",
+		ProductURL:    "Product URL",
+		Website:       "Website",
+		Votes:         "Votes",
 	},
 	Reddit: ForumLabels{
 		Header:  "Reddit List",
@@ -160,12 +162,13 @@ var zh = Labels{
 		URL:              "链接",
 	},
 	Product: ProductLabels{
-		Header:      "Product Hunt 榜单",
-		Name:        "名称",
-		Description: "描述",
-		ProductURL:  "产品介绍",
-		Website:     "产品网址",
-		Votes:       "投票",
+		Header:        "Product Hunt 榜单",
+		DetailsHeader: "Product Hunt 详情",
+		Name:          "名称",
+		Description:   "描述",
+		ProductURL:    "产品介绍",
+		Website:       "产品网址",
+		Votes:         "投票",
 	},
 	Reddit: ForumLabels{
 		Header:  "Reddit 帖子",

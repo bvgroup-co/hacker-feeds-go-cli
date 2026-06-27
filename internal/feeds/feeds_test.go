@@ -490,3 +490,116 @@ func shredditFixture() string {
 func arcticTreeCommentsFixture() string {
 	return `{"data":[{"kind":"t1","data":{"id":"c1","name":"t1_c1","link_id":"t3_abc123","parent_id":"t3_abc123","author":"alice","body":"Root full body without truncation","score":4,"permalink":"/r/golang/comments/abc123/comment/c1/","created_utc":1770000300,"replies":{"kind":"Listing","data":{"children":[{"kind":"t1","data":{"id":"c2","name":"t1_c2","link_id":"t3_abc123","parent_id":"t1_c1","author":"bob","body":"Reply body with\nmultiple lines","score":2,"permalink":"/r/golang/comments/abc123/comment/c2/","created_utc":1770000360,"replies":""}}]}}}},{"kind":"more","data":{"count":3,"id":"more1","name":"t1_more1","parent_id":"t3_abc123","children":["c3","c4","c5"]}}]}`
 }
+
+func TestNormalizeProductDetailsSlug(t *testing.T) {
+	slug, err := NormalizeProductDetailsSlug(" folio-ai ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slug != "folio-ai" {
+		t.Fatalf("slug = %q", slug)
+	}
+	for _, value := range []string{"", "products/folio-ai", "folio_ai", "folio-ai?x=1"} {
+		if _, err := NormalizeProductDetailsSlug(value); err == nil {
+			t.Fatalf("expected error for %q", value)
+		}
+	}
+}
+
+func TestNormalizeProductDetailsURL(t *testing.T) {
+	path, slug, err := NormalizeProductDetailsURL("https://www.producthunt.com/products/folio-ai?ref=nav")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "/products/folio-ai" || slug != "folio-ai" {
+		t.Fatalf("path=%q slug=%q", path, slug)
+	}
+	path, slug, err = NormalizeProductDetailsURL("https://producthunt.com/posts/folio-ai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "/posts/folio-ai" || slug != "folio-ai" {
+		t.Fatalf("path=%q slug=%q", path, slug)
+	}
+	for _, value := range []string{"https://example.com/products/folio-ai", "https://www.producthunt.com/topics/ai", "not-url"} {
+		if _, _, err := NormalizeProductDetailsURL(value); err == nil {
+			t.Fatalf("expected error for %q", value)
+		}
+	}
+}
+
+func TestFetchProductDetailsSendsNoAuthorization(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/products/folio-ai" {
+			t.Fatalf("path = %s", request.URL.Path)
+		}
+		if request.Header.Get("Authorization") != "" {
+			t.Fatalf("authorization = %s", request.Header.Get("Authorization"))
+		}
+		if request.Header.Get("Accept") != "text/html, application/xhtml+xml" {
+			t.Fatalf("accept = %s", request.Header.Get("Accept"))
+		}
+		_, _ = writer.Write([]byte(productDetailsHTML()))
+	}))
+	defer server.Close()
+	client := Client{HTTP: server.Client(), ProductWebBase: server.URL}
+	details, err := client.FetchProductDetails(ProductDetailsInput{Slug: "folio-ai"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if details.Name != "Folio AI" || details.Source != "producthunt-public-page" || !details.VotesKnown || details.Votes != 123 {
+		t.Fatalf("details = %#v", details)
+	}
+}
+
+func TestParseProductDetailsJSONLDAndEmbeddedData(t *testing.T) {
+	details := parseProductDetailsPage([]byte(productDetailsHTML()), "https://www.producthunt.com", "folio-ai")
+	if details.Name != "Folio AI" || details.Description != "Launch description" || details.Tagline != "AI portfolio builder" {
+		t.Fatalf("details text = %#v", details)
+	}
+	if details.ProductURL != "https://www.producthunt.com/products/folio-ai" || details.WebsiteURL != "https://folio.example/?utm=ph" || details.CleanDomain != "folio.example" {
+		t.Fatalf("urls = %#v", details)
+	}
+	if !details.VotesKnown || details.Votes != 123 || details.CommentsCount != 9 || details.FollowersCount != 77 || details.ReviewsCount != 4 || details.ReviewsRating != 4.5 {
+		t.Fatalf("counts = %#v", details)
+	}
+	if len(details.Makers) != 1 || details.Makers[0].Name != "Ada" || len(details.Topics) != 1 || details.Topics[0].Slug != "artificial-intelligence" || len(details.Media) != 2 {
+		t.Fatalf("collections = %#v", details)
+	}
+}
+
+func TestParseProductDetailsHiddenVotes(t *testing.T) {
+	html := `<html><script>self.__next_f.push([1,{"product":{"name":"Hidden","slug":"hidden"},"launch":{"hideVotesCount":true,"latestScore":99}}])</script></html>`
+	details := parseProductDetailsPage([]byte(html), "https://www.producthunt.com", "hidden")
+	if !details.VotesHidden || details.VotesKnown || details.Votes != 0 {
+		t.Fatalf("details = %#v", details)
+	}
+}
+
+func TestParseProductDetailsHiddenVotesDominateNestedScores(t *testing.T) {
+	html := `<html><script>self.__next_f.push([1,{"hideVotesCount":true,"launch":{"latestScore":99},"product":{"name":"Hidden","slug":"hidden"}}])</script></html>`
+	details := parseProductDetailsPage([]byte(html), "https://www.producthunt.com", "hidden")
+	if !details.VotesHidden || details.VotesKnown || details.Votes != 0 {
+		t.Fatalf("details = %#v", details)
+	}
+}
+
+func TestParseProductDetailsNormalizesPathCleanURL(t *testing.T) {
+	html := `<html><script>self.__next_f.push([1,{"product":{"name":"Support","slug":"support","websiteUrl":"https://support.claude.com/en/articles/1","cleanUrl":"support.claude.com/en/articles/1"}}])</script></html>`
+	details := parseProductDetailsPage([]byte(html), "https://www.producthunt.com", "support")
+	if details.CleanDomain != "support.claude.com" {
+		t.Fatalf("details = %#v", details)
+	}
+}
+
+func TestParseProductDetailsMetaOnlyFallback(t *testing.T) {
+	html := `<html><head><title>Meta Product | Product Hunt</title><meta name="description" content="Meta description"><meta property="og:image" content="https://img.example/meta.png"><link rel="canonical" href="https://www.producthunt.com/products/meta-product?ref=x"></head></html>`
+	details := parseProductDetailsPage([]byte(html), "https://www.producthunt.com", "meta-product")
+	if details.Name != "Meta Product" || details.Description != "Meta description" || details.ProductURL != "https://www.producthunt.com/products/meta-product" || len(details.Media) != 1 {
+		t.Fatalf("details = %#v", details)
+	}
+}
+
+func productDetailsHTML() string {
+	return `<html><head><title>Fallback Title | Product Hunt</title><meta name="description" content="Meta description"><script type="application/ld+json">{"name":"Folio AI","description":"JSON-LD description","url":"https://www.producthunt.com/products/folio-ai","image":"https://img.example/cover.png","author":[{"name":"Ada","url":"https://www.producthunt.com/@ada"}],"aggregateRating":{"ratingValue":"4.5","reviewCount":"4"}}</script></head><body><script>self.__next_f.push([1,{"product":{"name":"Folio AI","slug":"folio-ai","websiteUrl":"https://folio.example/?utm=ph","cleanUrl":"folio.example"},"launch":{"name":"Folio AI Launch","tagline":"AI portfolio builder","description":"Launch description","latestScore":123,"commentsCount":9,"followersCount":77,"reviewsCount":4,"reviewsRating":4.5,"featuredAt":"2026-06-01T00:00:00Z"},"topics":{"edges":[{"node":{"name":"Artificial Intelligence","slug":"artificial-intelligence"}}]},"media":[{"url":"https://img.example/screen.png","type":"image"}]}])</script></body></html>`
+}

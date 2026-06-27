@@ -7,6 +7,7 @@ type Client struct {
 	GitHubBase       string
 	NewsBase         string
 	ProductBase      string
+	ProductWebBase   string
 	RedditBase       string
 	ArcticShiftBase  string
 	RedditUserAgent  string
@@ -59,6 +60,51 @@ type Product struct {
 	Votes       int
 	VotesKnown  bool
 	Source      string
+}
+
+type ProductDetailsInput struct {
+	URL  string
+	Slug string
+}
+
+type ProductDetails struct {
+	Slug           string
+	Name           string
+	LaunchName     string
+	Tagline        string
+	Description    string
+	ProductURL     string
+	WebsiteURL     string
+	CleanDomain    string
+	Makers         []ProductMaker
+	Topics         []ProductTopic
+	Media          []ProductMedia
+	Votes          int
+	VotesKnown     bool
+	VotesHidden    bool
+	CommentsCount  int
+	ReviewsCount   int
+	ReviewsRating  float64
+	FollowersCount int
+	PublishedAt    string
+	UpdatedAt      string
+	Source         string
+}
+
+type ProductMaker struct {
+	Name     string `json:"name"`
+	Username string `json:"username"`
+	URL      string `json:"url"`
+}
+
+type ProductTopic struct {
+	Name string
+	Slug string
+}
+
+type ProductMedia struct {
+	URL  string
+	Type string
 }
 
 type RedditPost struct {
@@ -118,6 +164,7 @@ func NewClientFromEnv(getenv func(string) string) Client {
 		GitHubBase:       valueOrDefault(getenv("HFEEDS_GITHUB_BASE_URL"), "https://github.com"),
 		NewsBase:         valueOrDefault(getenv("HFEEDS_HN_BASE_URL"), "https://hacker-news.firebaseio.com/v0"),
 		ProductBase:      valueOrDefault(getenv("HFEEDS_PRODUCT_HUNT_BASE_URL"), defaultProductBase),
+		ProductWebBase:   valueOrDefault(getenv("HFEEDS_PRODUCT_HUNT_WEB_BASE_URL"), defaultProductWebBase),
 		RedditBase:       valueOrDefault(getenv("HFEEDS_REDDIT_BASE_URL"), defaultRedditBase),
 		ArcticShiftBase:  valueOrDefault(getenv("HFEEDS_ARCTIC_SHIFT_BASE_URL"), defaultArcticShiftBase),
 		RedditUserAgent:  getenv("HFEEDS_REDDIT_USER_AGENT"),

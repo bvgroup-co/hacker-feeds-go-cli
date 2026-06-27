@@ -186,6 +186,24 @@ func TestProductRedditV2EXE2E(t *testing.T) {
 	if result.code != 0 || !strings.Contains(result.stdout, "Product Hunt List") || !strings.Contains(result.stdout, "Votes: unavailable from public feed") || strings.Contains(result.stdout, "?ref=x") {
 		t.Fatalf("product = %#v", result)
 	}
+	productDetailsServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Authorization") != "" {
+			t.Fatalf("authorization = %s", request.Header.Get("Authorization"))
+		}
+		if request.URL.Path != "/products/folio-ai" {
+			t.Fatalf("path = %s", request.URL.Path)
+		}
+		_, _ = writer.Write([]byte(productE2EDetailsHTML()))
+	}))
+	defer productDetailsServer.Close()
+	result = run(t, []string{"product", "--details", "--slug", "folio-ai"}, []string{"HFEEDS_PRODUCT_HUNT_WEB_BASE_URL=" + productDetailsServer.URL})
+	if result.code != 0 || !strings.Contains(result.stdout, "Product Hunt Details") || !strings.Contains(result.stdout, "Name: Folio AI") || !strings.Contains(result.stdout, "Source: producthunt-public-page") {
+		t.Fatalf("product details slug = %#v", result)
+	}
+	result = run(t, []string{"product", "details", "--url", "https://www.producthunt.com/products/folio-ai"}, []string{"HFEEDS_PRODUCT_HUNT_WEB_BASE_URL=" + productDetailsServer.URL})
+	if result.code != 0 || !strings.Contains(result.stdout, "Product URL: "+productDetailsServer.URL+"/products/folio-ai") {
+		t.Fatalf("product details url = %#v", result)
+	}
 	home := writeLang(t, "zh")
 	result = run(t, []string{"product"}, []string{"HOME=" + home, "HFEEDS_PRODUCT_HUNT_BASE_URL=" + productServer.URL})
 	if result.code != 0 || !strings.Contains(result.stdout, "Product Hunt 榜单") || !strings.Contains(result.stdout, "投票: unavailable from public feed") {
@@ -425,6 +443,10 @@ func redditE2ERSS() string {
 
 func productE2EAtom() string {
 	return `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><entry><title>Prod</title><published>2026-06-27T08:00:00Z</published><link rel="alternate" href="https://p.example/path?ref=x" /><content type="html">&lt;p&gt;Desc&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://w.example/?a=b&quot;&gt;Link&lt;/a&gt;&lt;/p&gt;</content></entry></feed>`
+}
+
+func productE2EDetailsHTML() string {
+	return `<html><head><title>Folio AI | Product Hunt</title><meta name="description" content="AI portfolio builder"><link rel="canonical" href="/products/folio-ai"></head><body><script>self.__next_f.push([1,{"product":{"name":"Folio AI","slug":"folio-ai"},"launch":{"description":"Build a portfolio with AI","tagline":"AI portfolio builder"}}])</script></body></html>`
 }
 
 func redditE2EArcticTree() string {

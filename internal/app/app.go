@@ -229,6 +229,18 @@ func (app App) product(args []string, labels i18n.Labels) error {
 		app.printCommandHelp(app.Out, []string{"product"})
 		return nil
 	}
+	if len(args) > 0 && args[0] == "details" {
+		return app.productDetails(args[1:], labels)
+	}
+	if hasAnyFlag(args, "--details") {
+		filtered := make([]string, 0, len(args)-1)
+		for _, arg := range args {
+			if arg != "--details" {
+				filtered = append(filtered, arg)
+			}
+		}
+		return app.productDetails(filtered, labels)
+	}
 	flags, err := parseStringFlags(args, map[string]string{"--count": "10", "--past": "0"}, flagSpec{Short: "-c", Long: "--count"}, flagSpec{Short: "-p", Long: "--past"})
 	if err != nil {
 		return err
@@ -252,6 +264,23 @@ func (app App) product(args []string, labels i18n.Labels) error {
 		return nil
 	}
 	output.Product(app.Out, labels, products)
+	return nil
+}
+
+func (app App) productDetails(args []string, labels i18n.Labels) error {
+	if wantsHelp(args) {
+		app.printCommandHelp(app.Out, []string{"product", "details"})
+		return nil
+	}
+	flags, err := parseProductDetailsFlags(args)
+	if err != nil {
+		return err
+	}
+	details, err := app.client().FetchProductDetails(feeds.ProductDetailsInput{URL: flags["--url"], Slug: flags["--slug"]})
+	if err != nil {
+		return err
+	}
+	output.ProductDetails(app.Out, labels, details)
 	return nil
 }
 
@@ -387,6 +416,19 @@ func (app App) printCommandHelp(writer io.Writer, command []string) {
 	case "product":
 		fmt.Fprintln(writer, "Usage:")
 		fmt.Fprintln(writer, "  hfeeds product [-c count] [-p past]")
+		fmt.Fprintln(writer, "  hfeeds product --details --url product_url")
+		fmt.Fprintln(writer, "  hfeeds product --details --slug product_slug")
+		fmt.Fprintln(writer, "  hfeeds product details --url product_url")
+		fmt.Fprintln(writer, "  hfeeds product details --slug product_slug")
+	case "product details":
+		fmt.Fprintln(writer, "Usage:")
+		fmt.Fprintln(writer, "  hfeeds product details --url product_url")
+		fmt.Fprintln(writer, "  hfeeds product details --slug product_slug")
+		fmt.Fprintln(writer)
+		fmt.Fprintln(writer, "Options:")
+		fmt.Fprintln(writer, "  --url        Product Hunt product or post URL")
+		fmt.Fprintln(writer, "  --slug       Product Hunt slug")
+		fmt.Fprintln(writer, "  -h, --help   display help")
 	case "reddit":
 		fmt.Fprintln(writer, "Usage:")
 		fmt.Fprintln(writer, "  hfeeds reddit [-t topic] [-c limit]")

@@ -84,6 +84,99 @@ func Product(writer io.Writer, labels i18n.Labels, products []feeds.Product) {
 	}
 }
 
+func ProductDetails(writer io.Writer, labels i18n.Labels, details feeds.ProductDetails) {
+	header(writer, labels.Product.DetailsHeader)
+	if details.Name != "" {
+		fmt.Fprintf(writer, "%s: %s\n", labels.Product.Name, details.Name)
+	}
+	if details.LaunchName != "" {
+		fmt.Fprintf(writer, "Launch name: %s\n", details.LaunchName)
+	}
+	if details.Tagline != "" {
+		fmt.Fprintf(writer, "Tagline: %s\n", details.Tagline)
+	}
+	if details.Description != "" {
+		fmt.Fprintf(writer, "%s: %s\n", labels.Product.Description, details.Description)
+	}
+	if details.ProductURL != "" {
+		fmt.Fprintf(writer, "%s: %s\n", labels.Product.ProductURL, details.ProductURL)
+	}
+	if details.WebsiteURL != "" {
+		fmt.Fprintf(writer, "%s: %s\n", labels.Product.Website, details.WebsiteURL)
+	}
+	if details.CleanDomain != "" {
+		fmt.Fprintf(writer, "Clean domain: %s\n", details.CleanDomain)
+	}
+	if details.VotesKnown {
+		fmt.Fprintf(writer, "%s: %d\n", labels.Product.Votes, details.Votes)
+	} else {
+		fmt.Fprintf(writer, "%s: unavailable from public page\n", labels.Product.Votes)
+	}
+	if details.CommentsCount != 0 {
+		fmt.Fprintf(writer, "Comments count: %d\n", details.CommentsCount)
+	}
+	if details.ReviewsCount != 0 {
+		fmt.Fprintf(writer, "Reviews count: %d\n", details.ReviewsCount)
+	}
+	if details.ReviewsRating != 0 {
+		fmt.Fprintf(writer, "Reviews rating: %.1f\n", details.ReviewsRating)
+	}
+	if details.FollowersCount != 0 {
+		fmt.Fprintf(writer, "Followers count: %d\n", details.FollowersCount)
+	}
+	writeProductMakers(writer, details.Makers)
+	writeProductTopics(writer, details.Topics)
+	writeProductMedia(writer, details.Media)
+	fmt.Fprintf(writer, "Source: %s\n", details.Source)
+	separator(writer)
+}
+
+func writeProductMakers(writer io.Writer, makers []feeds.ProductMaker) {
+	if len(makers) == 0 {
+		return
+	}
+	fmt.Fprintln(writer, "Makers:")
+	for _, maker := range makers {
+		name := maker.Name
+		if maker.Username != "" {
+			name += " (@" + maker.Username + ")"
+		}
+		if maker.URL != "" {
+			fmt.Fprintf(writer, "- %s: %s\n", name, maker.URL)
+			continue
+		}
+		fmt.Fprintf(writer, "- %s\n", name)
+	}
+}
+
+func writeProductTopics(writer io.Writer, topics []feeds.ProductTopic) {
+	if len(topics) == 0 {
+		return
+	}
+	fmt.Fprintln(writer, "Topics:")
+	for _, topic := range topics {
+		if topic.Slug != "" {
+			fmt.Fprintf(writer, "- %s (%s)\n", topic.Name, topic.Slug)
+			continue
+		}
+		fmt.Fprintf(writer, "- %s\n", topic.Name)
+	}
+}
+
+func writeProductMedia(writer io.Writer, media []feeds.ProductMedia) {
+	if len(media) == 0 {
+		return
+	}
+	fmt.Fprintln(writer, "Media URLs:")
+	for _, item := range media {
+		if item.Type != "" {
+			fmt.Fprintf(writer, "- %s: %s\n", item.Type, item.URL)
+			continue
+		}
+		fmt.Fprintf(writer, "- %s\n", item.URL)
+	}
+}
+
 func Reddit(writer io.Writer, labels i18n.Labels, posts []feeds.RedditPost) {
 	header(writer, labels.Reddit.Header)
 	for _, post := range posts {
