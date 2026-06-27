@@ -34,3 +34,12 @@ func TestNewsDiscussionSeparatesTopLevelSubtrees(t *testing.T) {
 		t.Fatalf("output = %q", output)
 	}
 }
+
+func TestProductShowsUnknownVotesExplicitly(t *testing.T) {
+	var builder strings.Builder
+	Product(&builder, i18n.For("en"), []feeds.Product{{Name: "Prod", Source: "producthunt-feed", VotesKnown: false}})
+	output := builder.String()
+	if strings.Contains(output, "Votes: 0") || !strings.Contains(output, "Votes: unavailable from public feed") || !strings.Contains(output, "Source: producthunt-feed") {
+		t.Fatalf("output = %q", output)
+	}
+}

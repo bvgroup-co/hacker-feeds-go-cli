@@ -161,35 +161,51 @@ func TestFetchNewsDiscussionRejectsInvalidRoot(t *testing.T) {
 
 func TestFetchProducts(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Method != http.MethodPost {
+		if request.Method != http.MethodGet {
 			t.Fatalf("method = %s", request.Method)
 		}
-		if request.Header.Get("Authorization") != "Bearer token" {
+		if request.Header.Get("Authorization") != "" {
 			t.Fatalf("authorization = %s", request.Header.Get("Authorization"))
 		}
-		body := readRequestBody(t, request)
-		for _, fragment := range []string{"first: 2", `postedAfter: \"2026-06-25\"`, `postedBefore: \"2026-06-27\"`} {
-			if !strings.Contains(body, fragment) {
-				t.Fatalf("body missing %s: %s", fragment, body)
-			}
+		if !strings.Contains(request.Header.Get("Accept"), "application/atom+xml") || request.Header.Get("User-Agent") == "" {
+			t.Fatalf("headers=%#v", request.Header)
 		}
-		_, _ = writer.Write([]byte(`{"data":{"posts":{"edges":[{"node":{"name":"Prod","description":"Desc","url":"https://p.example/path?ref=x","website":"https://w.example/?a=b","votesCount":7}}]}}}`))
+		_, _ = writer.Write([]byte(productAtomFixture()))
 	}))
 	defer server.Close()
 
-	items, err := (Client{HTTP: server.Client(), ProductBase: server.URL, ProductToken: "token"}).FetchProducts(2, 1, time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC))
+	items, err := (Client{HTTP: server.Client(), ProductBase: server.URL}).FetchProducts(2, 1, time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].URL != "https://p.example/path" || items[0].Website != "https://w.example/" {
+	if len(items) != 1 || items[0].Name != "Prod & One" || items[0].Description != "First paragraph & details" || items[0].URL != "https://www.producthunt.com/posts/prod-one" || items[0].Website != "https://producthunt.com/r/example" || items[0].VotesKnown || items[0].Source != "producthunt-feed" {
 		t.Fatalf("items = %#v", items)
 	}
 }
 
-func TestFetchProductsRequiresToken(t *testing.T) {
-	_, err := (Client{}).FetchProducts(1, 0, time.Now())
-	if err == nil {
-		t.Fatal("expected error")
+func TestFetchProductsDoesNotRequireTokenEnv(t *testing.T) {
+	t.Setenv("PRODUCT_HUNT_ACCESS_TOKEN", "")
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Authorization") != "" {
+			t.Fatalf("authorization = %s", request.Header.Get("Authorization"))
+		}
+		_, _ = writer.Write([]byte(productAtomFixture()))
+	}))
+	defer server.Close()
+
+	client := NewClientFromEnv(func(name string) string {
+		if name == "HFEEDS_PRODUCT_HUNT_BASE_URL" {
+			return server.URL
+		}
+		return ""
+	})
+	client.HTTP = server.Client()
+	items, err := client.FetchProducts(1, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].VotesKnown {
+		t.Fatalf("items = %#v", items)
 	}
 }
 
@@ -209,16 +225,6 @@ func TestFetchV2EX(t *testing.T) {
 	if len(topics) != 1 || topics[0].Node != "programmer" || topics[0].Votes != 6 {
 		t.Fatalf("topics = %#v", topics)
 	}
-}
-
-func readRequestBody(t *testing.T, request *http.Request) string {
-	t.Helper()
-	body := make([]byte, request.ContentLength)
-	_, err := request.Body.Read(body)
-	if err != nil && err.Error() != "EOF" {
-		t.Fatal(err)
-	}
-	return string(body)
 }
 
 func TestFetchRedditUsesRSSFirst(t *testing.T) {
@@ -300,18 +306,18 @@ func TestFetchRedditFallsBackOnInvalidRSS(t *testing.T) {
 	}
 }
 
-func TestFetchRedditCommentsUsesShredditFirst(t *testing.T) {
+func TestFetchRedditCommentsUsesArcticShiftTreeFirst(t *testing.T) {
 	var paths []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		paths = append(paths, request.URL.Path)
-		if request.URL.Path != "/svc/shreddit/comments/r/golang/t3_abc123" {
+		if request.URL.Path != "/api/comments/tree" {
 			http.NotFound(writer, request)
 			return
 		}
-		if request.URL.Query().Get("limit") != "10" || request.URL.Query().Get("depth") != "2" || !strings.Contains(request.Header.Get("Accept"), "text/html") {
+		if request.URL.Query().Get("link_id") != "t3_abc123" || request.URL.Query().Get("limit") != "10" || request.URL.Query().Get("start_breadth") != "10" || request.URL.Query().Get("start_depth") != "2" || !strings.Contains(request.Header.Get("Accept"), "application/json") {
 			t.Fatalf("request = %s headers=%#v", request.URL.String(), request.Header)
 		}
-		_, _ = writer.Write([]byte(shredditFixture()))
+		_, _ = writer.Write([]byte(arcticTreeCommentsFixture()))
 	}))
 	defer server.Close()
 
@@ -319,33 +325,36 @@ func TestFetchRedditCommentsUsesShredditFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(paths, ",") != "/svc/shreddit/comments/r/golang/t3_abc123" {
+	if strings.Join(paths, ",") != "/api/comments/tree" {
 		t.Fatalf("paths = %#v", paths)
 	}
-	if discussion.Post.Source != "reddit-shreddit" || len(discussion.Comments) != 1 {
+	if discussion.Post.Source != "arctic-shift" || len(discussion.Comments) != 2 {
 		t.Fatalf("discussion = %#v", discussion)
 	}
 	root := discussion.Comments[0]
-	if root.ID != "c1" || root.Name != "t1_c1" || root.Author != "alice" || root.Body != "Root & body" || root.Score != 7 || root.Depth != 0 || root.CreatedUTC != 1770005000 || len(root.Replies) != 1 {
+	if root.ID != "c1" || root.Name != "t1_c1" || root.Author != "alice" || root.Body != "Root full body without truncation" || root.Score != 4 || root.Depth != 0 || root.CreatedUTC != 1770000300 || len(root.Replies) != 1 {
 		t.Fatalf("root = %#v", root)
 	}
-	if root.Replies[0].ID != "c2" || root.Replies[0].ParentID != "t1_c1" || root.Replies[0].Body != "Reply body" || root.Replies[0].Depth != 1 {
+	if root.Replies[0].ID != "c2" || root.Replies[0].ParentID != "t1_c1" || root.Replies[0].Body != "Reply body with\nmultiple lines" || root.Replies[0].Depth != 1 {
 		t.Fatalf("reply = %#v", root.Replies[0])
+	}
+	if !discussion.Comments[1].More || discussion.Comments[1].Count != 3 {
+		t.Fatalf("more = %#v", discussion.Comments[1])
 	}
 }
 
-func TestFetchRedditCommentsFallsBackToArcticShift(t *testing.T) {
+func TestFetchRedditCommentsFallsBackToShreddit(t *testing.T) {
 	var paths []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		paths = append(paths, request.URL.Path)
 		switch request.URL.Path {
+		case "/api/comments/tree":
+			http.Error(writer, "blocked", http.StatusBadGateway)
 		case "/svc/shreddit/comments/r/golang/t3_abc123":
-			_, _ = writer.Write([]byte(`<html><title>verification required</title></html>`))
-		case "/api/comments/search":
-			if request.URL.Query().Get("link_id") != "t3_abc123" || request.URL.Query().Get("limit") != "10" {
+			if request.URL.Query().Get("limit") != "10" || request.URL.Query().Get("depth") != "2" || !strings.Contains(request.Header.Get("Accept"), "text/html") {
 				t.Fatalf("query = %s", request.URL.RawQuery)
 			}
-			_, _ = writer.Write([]byte(arcticCommentsFixture()))
+			_, _ = writer.Write([]byte(shredditFixture()))
 		default:
 			http.NotFound(writer, request)
 		}
@@ -356,14 +365,24 @@ func TestFetchRedditCommentsFallsBackToArcticShift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(paths, ",") != "/svc/shreddit/comments/r/golang/t3_abc123,/api/comments/search" {
+	if strings.Join(paths, ",") != "/api/comments/tree,/svc/shreddit/comments/r/golang/t3_abc123" {
 		t.Fatalf("paths = %#v", paths)
 	}
-	if discussion.Post.Source != "arctic-shift" || len(discussion.Comments) != 1 || len(discussion.Comments[0].Replies) != 1 {
+	if discussion.Post.Source != "reddit-shreddit" || len(discussion.Comments) != 1 || len(discussion.Comments[0].Replies) != 1 {
 		t.Fatalf("discussion = %#v", discussion)
 	}
-	if discussion.Comments[0].Source != "arctic-shift" || discussion.Comments[0].Replies[0].ParentID != "t1_c1" {
+	if discussion.Comments[0].Source != "reddit-shreddit" || discussion.Comments[0].Replies[0].ParentID != "t1_c1" {
 		t.Fatalf("comments = %#v", discussion.Comments)
+	}
+}
+
+func TestParseShredditCommentsRejectsStatsAndNestedMarkup(t *testing.T) {
+	if comments, err := parseShredditComments([]byte(`<shreddit-comment-tree-stats thingId="t1_bad"></shreddit-comment-tree-stats>`)); err == nil || len(comments) != 0 {
+		t.Fatalf("stats comments=%#v err=%v", comments, err)
+	}
+	corrupted := `<shreddit-comment thingId="t1_c1" author="alice"><div slot="comment">root<shreddit-comment thingId="t1_c2" author="bob"><div slot="comment">child</div></shreddit-comment></div></shreddit-comment>`
+	if comments, err := parseShredditComments([]byte(corrupted)); err == nil || len(comments) != 0 {
+		t.Fatalf("nested comments=%#v err=%v", comments, err)
 	}
 }
 
@@ -393,6 +412,8 @@ func TestFetchRedditNoOAuthOrJSON(t *testing.T) {
 		switch request.URL.Path {
 		case "/r/golang/.rss":
 			_, _ = writer.Write([]byte(redditRSSFixture()))
+		case "/api/comments/tree":
+			_, _ = writer.Write([]byte(arcticTreeCommentsFixture()))
 		case "/svc/shreddit/comments/r/golang/t3_abc123":
 			_, _ = writer.Write([]byte(shredditFixture()))
 		default:
@@ -408,7 +429,7 @@ func TestFetchRedditNoOAuthOrJSON(t *testing.T) {
 	if _, err := client.FetchRedditComments("golang", "abc123", 10, 2); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(paths, ",") != "/r/golang/.rss,/svc/shreddit/comments/r/golang/t3_abc123" {
+	if strings.Join(paths, ",") != "/r/golang/.rss,/api/comments/tree" {
 		t.Fatalf("paths = %#v", paths)
 	}
 }
@@ -444,10 +465,28 @@ func redditRSSFixture() string {
 </feed>`
 }
 
+func productAtomFixture() string {
+	return `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Prod &amp;amp; One</title>
+    <published>2026-06-26T08:00:00Z</published>
+    <link rel="alternate" href="https://www.producthunt.com/posts/prod-one?utm=feed" />
+    <content type="html">&lt;p&gt;First paragraph &amp;amp; details&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://producthunt.com/r/example?ref=ph&quot;&gt;Link&lt;/a&gt;&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <title>Older Prod</title>
+    <published>2026-06-20T08:00:00Z</published>
+    <link rel="alternate" href="https://www.producthunt.com/posts/older" />
+    <content type="html">&lt;p&gt;Older paragraph&lt;/p&gt;</content>
+  </entry>
+</feed>`
+}
+
 func shredditFixture() string {
 	return `<shreddit-comment thingId="t1_c1" author="alice" created="2026-02-02T04:03:20Z" depth="0" parentId="t3_abc123" permalink="/r/golang/comments/abc123/comment/c1/" score="7" postId="t3_abc123"><div slot="comment"><p>Root &amp;amp; body</p></div></shreddit-comment><shreddit-comment thingId="t1_c2" author="bob" created="2026-02-02T04:04:20Z" depth="1" parentId="t1_c1" permalink="/r/golang/comments/abc123/comment/c2/" score="2" postId="t3_abc123"><div slot="comment"><p>Reply body</p></div></shreddit-comment>`
 }
 
-func arcticCommentsFixture() string {
-	return `{"data":[{"id":"c1","name":"t1_c1","link_id":"t3_abc123","parent_id":"t3_abc123","author":"alice","body":"Root","score":4,"permalink":"/r/golang/comments/abc123/comment/c1/","created_utc":1770000300},{"id":"c2","name":"t1_c2","link_id":"t3_abc123","parent_id":"t1_c1","author":"bob","body":"Reply","score":2,"permalink":"/r/golang/comments/abc123/comment/c2/","created_utc":1770000360}]}`
+func arcticTreeCommentsFixture() string {
+	return `{"data":[{"kind":"t1","data":{"id":"c1","name":"t1_c1","link_id":"t3_abc123","parent_id":"t3_abc123","author":"alice","body":"Root full body without truncation","score":4,"permalink":"/r/golang/comments/abc123/comment/c1/","created_utc":1770000300,"replies":{"kind":"Listing","data":{"children":[{"kind":"t1","data":{"id":"c2","name":"t1_c2","link_id":"t3_abc123","parent_id":"t1_c1","author":"bob","body":"Reply body with\nmultiple lines","score":2,"permalink":"/r/golang/comments/abc123/comment/c2/","created_utc":1770000360,"replies":""}}]}}}},{"kind":"more","data":{"count":3,"id":"more1","name":"t1_more1","parent_id":"t3_abc123","children":["c3","c4","c5"]}}]}`
 }

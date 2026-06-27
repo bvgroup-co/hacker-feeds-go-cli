@@ -71,7 +71,12 @@ func writeNewsComment(writer io.Writer, comment feeds.NewsComment) {
 func Product(writer io.Writer, labels i18n.Labels, products []feeds.Product) {
 	header(writer, labels.Product.Header)
 	for _, product := range products {
-		fmt.Fprintf(writer, "%s: %s | %s: %d\n", labels.Product.Name, product.Name, labels.Product.Votes, product.Votes)
+		fmt.Fprintf(writer, "%s: %s | Source: %s\n", labels.Product.Name, product.Name, product.Source)
+		if product.VotesKnown {
+			fmt.Fprintf(writer, "%s: %d\n", labels.Product.Votes, product.Votes)
+		} else {
+			fmt.Fprintf(writer, "%s: unavailable from public feed\n", labels.Product.Votes)
+		}
 		fmt.Fprintf(writer, "%s: %s\n", labels.Product.Description, product.Description)
 		fmt.Fprintf(writer, "%s: %s\n", labels.Product.ProductURL, product.URL)
 		fmt.Fprintf(writer, "%s: %s\n", labels.Product.Website, product.Website)
