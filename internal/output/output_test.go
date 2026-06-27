@@ -43,3 +43,34 @@ func TestProductShowsUnknownVotesExplicitly(t *testing.T) {
 		t.Fatalf("output = %q", output)
 	}
 }
+
+func TestProductDetailsOutput(t *testing.T) {
+	details := feeds.ProductDetails{
+		Name:       "Folio AI",
+		Tagline:    "AI portfolio builder",
+		ProductURL: "https://www.producthunt.com/products/folio-ai",
+		VotesKnown: true,
+		Votes:      42,
+		Makers:     []feeds.ProductMaker{{Name: "Ada", Username: "ada"}},
+		Topics:     []feeds.ProductTopic{{Name: "AI", Slug: "ai"}},
+		Media:      []feeds.ProductMedia{{URL: "https://img.example/screen.png", Type: "image"}},
+		Source:     "producthunt-public-page",
+	}
+	var builder strings.Builder
+	ProductDetails(&builder, i18n.For("en"), details)
+	output := builder.String()
+	for _, want := range []string{"Product Hunt Details", "Votes: 42", "Source: producthunt-public-page", "Makers:", "Topics:", "Media URLs:"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("missing %q in %q", want, output)
+		}
+	}
+}
+
+func TestProductDetailsOutputShowsUnavailableVotes(t *testing.T) {
+	var builder strings.Builder
+	ProductDetails(&builder, i18n.For("en"), feeds.ProductDetails{Name: "Folio AI", Source: "producthunt-public-page"})
+	output := builder.String()
+	if strings.Contains(output, "Votes: 0") || !strings.Contains(output, "Votes: unavailable from public page") {
+		t.Fatalf("output = %q", output)
+	}
+}

@@ -76,6 +76,8 @@ func TestHelpCommands(t *testing.T) {
 		{"news", "-h"},
 		{"news", "help"},
 		{"product", "--help"},
+		{"product", "details", "--help"},
+		{"help", "product", "details"},
 		{"reddit", "--help"},
 		{"v2ex", "--help"},
 		{"news", "discussion", "--help"},
@@ -90,6 +92,31 @@ func TestHelpCommands(t *testing.T) {
 			var stderr bytes.Buffer
 			code := (App{Out: &out, Err: &stderr, Stdin: nil}).Run(command)
 			if code != 0 || !strings.Contains(out.String(), "Usage:") || stderr.Len() != 0 {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
+			}
+		})
+	}
+}
+
+func TestProductDetailsFlagErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_, _ = writer.Write([]byte(`<html><title>Product | Product Hunt</title></html>`))
+	}))
+	defer server.Close()
+	client := feeds.Client{HTTP: server.Client(), ProductWebBase: server.URL}
+	tests := [][]string{
+		{"product", "--details"},
+		{"product", "--details", "--url", "https://www.producthunt.com/products/folio-ai", "--slug", "folio-ai"},
+		{"product", "--details", "--slug", "folio-ai", "--count", "1"},
+		{"product", "details", "--slug", "folio-ai", "--past", "1"},
+		{"product", "details", "--url", "https://example.com/products/folio-ai"},
+	}
+	for _, args := range tests {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var out bytes.Buffer
+			var stderr bytes.Buffer
+			code := (App{Out: &out, Err: &stderr, Client: &client, Stdin: nil}).Run(args)
+			if code == 0 || stderr.Len() == 0 {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
 			}
 		})

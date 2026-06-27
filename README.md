@@ -69,6 +69,10 @@ hfeeds news [-t top]
 hfeeds news discussion --id item_id [--limit n] [--depth n]
 hfeeds news comments --id item_id [--limit n] [--depth n]
 hfeeds product [-c count] [-p past]
+hfeeds product --details --slug product_slug
+hfeeds product --details --url product_url
+hfeeds product details --slug product_slug
+hfeeds product details --url product_url
 hfeeds reddit [-t topic] [-c limit]
 hfeeds reddit comments --topic topic --post post_id [--limit n] [--depth n]
 hfeeds v2ex [-n node]
@@ -83,6 +87,8 @@ hfeeds news --top 5
 hfeeds news discussion --id 123456 --limit 20 --depth 3
 hfeeds news comments --id 123456 --limit 20 --depth 3
 hfeeds product --count 5 --past 1
+hfeeds product --details --slug folio-ai
+hfeeds product details --url https://www.producthunt.com/products/folio-ai
 hfeeds reddit --topic golang
 hfeeds reddit comments --topic golang --post abc123 --limit 10 --depth 2
 hfeeds v2ex --node programmer
@@ -107,7 +113,9 @@ Running `hfeeds config` without `--lang` in a non-interactive environment exits 
 
 ## Environment variables
 
-Product Hunt uses the public Atom feed at `https://www.producthunt.com/feed` and does not require credentials. Votes are not available from the public feed, so the CLI marks them as unavailable instead of printing a misleading count.
+Product Hunt list mode uses the public Atom feed at `https://www.producthunt.com/feed` and does not require credentials. Votes are not available from the public feed, so the CLI marks them as unavailable instead of printing a misleading count.
+
+Product Hunt details mode fetches public Product Hunt product pages and parses public HTML metadata, JSON-LD, and embedded page data. It does not use the Product Hunt API, does not require credentials, and does not send an `Authorization` header. Votes may be available on public pages, but the CLI marks them unavailable when votes are hidden or not rendered.
 
 ### Hacker News access
 
@@ -148,6 +156,7 @@ The HTTP base URLs can be overridden for tests:
 HFEEDS_GITHUB_BASE_URL=http://127.0.0.1:8080
 HFEEDS_HN_BASE_URL=http://127.0.0.1:8081
 HFEEDS_PRODUCT_HUNT_BASE_URL=http://127.0.0.1:8082/feed
+HFEEDS_PRODUCT_HUNT_WEB_BASE_URL=http://127.0.0.1:8082
 HFEEDS_REDDIT_BASE_URL=http://127.0.0.1:8083
 HFEEDS_ARCTIC_SHIFT_BASE_URL=http://127.0.0.1:8084
 HFEEDS_V2EX_BASE_URL=http://127.0.0.1:8084
