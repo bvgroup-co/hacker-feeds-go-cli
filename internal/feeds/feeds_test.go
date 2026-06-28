@@ -536,7 +536,7 @@ func TestFetchProductDetailsSendsNoAuthorization(t *testing.T) {
 		if request.Header.Get("Authorization") != "" {
 			t.Fatalf("authorization = %s", request.Header.Get("Authorization"))
 		}
-		if request.Header.Get("Accept") != "text/html, application/xhtml+xml" {
+		if !strings.Contains(request.Header.Get("Accept"), "text/html") || request.Header.Get("Accept-Language") == "" || request.Header.Get("Sec-Fetch-Dest") != "document" {
 			t.Fatalf("accept = %s", request.Header.Get("Accept"))
 		}
 		_, _ = writer.Write([]byte(productDetailsHTML()))
@@ -601,7 +601,7 @@ func TestParseProductDetailsMetaOnlyFallback(t *testing.T) {
 }
 
 func TestParseProductCommentsApolloData(t *testing.T) {
-	comments := parseProductCommentsPage([]byte(productCommentsHTML()), "https://www.producthunt.com", "folio-ai", 20, 2)
+	comments := parseProductCommentsPage([]byte(productCommentsHTML()), "https://www.producthunt.com", "folio-ai", 20, 2, nil)
 	if comments.ProductName != "Folio AI" || comments.CommentsCount != 3 || comments.ShownComments != 2 || comments.Complete {
 		t.Fatalf("summary = %#v", comments)
 	}
@@ -618,26 +618,69 @@ func TestParseProductCommentsApolloData(t *testing.T) {
 }
 
 func TestParseProductApolloUnquotedKeys(t *testing.T) {
-	comments := parseProductCommentsPage([]byte(`<html><script>window[Symbol.for("ApolloSSRDataTransport")].push({product:{name:"Folio AI",slug:"folio-ai"},commentsCount:1,comments:{pageInfo:{hasNextPage:false},edges:[{node:{__typename:"Comment",id:"1",bodyText:undefined,user:{name:"Ada"}}}]}})</script></html>`), "https://www.producthunt.com", "folio-ai", 20, 2)
+	comments := parseProductCommentsPage([]byte(`<html><script>window[Symbol.for("ApolloSSRDataTransport")].push({product:{name:"Folio AI",slug:"folio-ai"},commentsCount:1,comments:{pageInfo:{hasNextPage:false},edges:[{node:{__typename:"Comment",id:"1",bodyText:undefined,user:{name:"Ada"}}}]}})</script></html>`), "https://www.producthunt.com", "folio-ai", 20, 2, nil)
 	if comments.CommentsCount != 1 || len(comments.Comments) != 1 || comments.Comments[0].ID != "1" || comments.Comments[0].AuthorName != "Ada" {
 		t.Fatalf("comments = %#v", comments)
 	}
 }
 
 func TestParseProductCommentsLimitDepthAndComplete(t *testing.T) {
-	comments := parseProductCommentsPage([]byte(productCommentsHTML()), "https://www.producthunt.com", "folio-ai", 1, 1)
+	comments := parseProductCommentsPage([]byte(productCommentsHTML()), "https://www.producthunt.com", "folio-ai", 1, 1, nil)
 	if comments.ShownComments != 1 || len(comments.Comments) != 1 || len(comments.Comments[0].Replies) != 0 {
 		t.Fatalf("limited = %#v", comments)
 	}
-	complete := parseProductCommentsPage([]byte(productCompleteCommentsHTML()), "https://www.producthunt.com", "folio-ai", 20, 3)
+	complete := parseProductCommentsPage([]byte(productCompleteCommentsHTML()), "https://www.producthunt.com", "folio-ai", 20, 3, nil)
 	if !complete.Complete || complete.ShownComments != 2 {
 		t.Fatalf("complete = %#v", complete)
 	}
 }
 
 func TestProductPageBlocked(t *testing.T) {
-	if !productPageBlocked([]byte(`<html><title>Just a moment...</title><div id="cf-challenge"></div></html>`)) {
+	falseBlock := productPage{StatusCode: http.StatusOK, Header: http.Header{}, Body: []byte(`<html><script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script><script>window[Symbol.for("ApolloSSRDataTransport")].push({commentsCount:1})</script></html>`)}
+	if productPageBlocked(falseBlock) {
+		t.Fatal("normal page with jsd script was reported as blocked")
+	}
+	hardBlock := productPage{StatusCode: http.StatusForbidden, Header: http.Header{"Server": []string{"cloudflare"}}, Body: []byte(`<html><title>Just a moment...</title><div id="cf-challenge"></div></html>`)}
+	if !productPageBlocked(hardBlock) {
 		t.Fatal("expected Cloudflare challenge detection")
+	}
+}
+
+func TestProductCommentPageLinks(t *testing.T) {
+	body := []byte(`<html><a href="/products/folio-ai?page=2#comments">2</a><a href="https://www.producthunt.com/products/folio-ai?page=3#comments">3</a><a href="/products/other?page=4#comments">other</a></html>`)
+	links := productCommentPageLinks(body, "/products/folio-ai", "folio-ai")
+	if len(links) != 2 || links[0] != "/products/folio-ai?page=2#comments" || links[1] != "/products/folio-ai?page=3#comments" {
+		t.Fatalf("links = %#v", links)
+	}
+}
+
+func TestProductCommentsRichBeatsSkeletalDedupe(t *testing.T) {
+	collector := newProductCommentCollector()
+	_ = parseProductCommentsPage([]byte(`<html><script>window[Symbol.for("ApolloSSRDataTransport")].push({commentsCount:1,comments:{edges:[{node:{__typename:"Comment",id:"1"}}]}})</script></html>`), "https://www.producthunt.com", "folio-ai", 20, 2, collector)
+	comments := parseProductCommentsPage([]byte(`<html><script>window[Symbol.for("ApolloSSRDataTransport")].push({commentsCount:1,comments:{edges:[{node:{__typename:"Comment",id:"1",bodyText:"Rich comment",user:{name:"Ada"}}}]}})</script></html>`), "https://www.producthunt.com", "folio-ai", 20, 2, collector)
+	if len(comments.Comments) != 1 || comments.Comments[0].BodyText != "Rich comment" || comments.Comments[0].AuthorName != "Ada" {
+		t.Fatalf("comments = %#v", comments.Comments)
+	}
+}
+
+func TestFetchProductCommentsMultipageCompleteness(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.RequestURI() {
+		case "/products/folio-ai":
+			_, _ = writer.Write([]byte(`<html><head><title>Folio AI | Product Hunt</title><link rel="canonical" href="/products/folio-ai"></head><body><a href="/products/folio-ai?page=2#comments">2</a><script>window[Symbol.for("ApolloSSRDataTransport")].push({product:{name:"Folio AI",slug:"folio-ai"},commentsCount:2,comments:{pageInfo:{hasNextPage:true},edges:[{node:{__typename:"Comment",id:"1",bodyText:"One"}}]}})</script></body></html>`))
+		case "/products/folio-ai?page=2":
+			_, _ = writer.Write([]byte(`<html><head><title>Folio AI | Product Hunt</title><link rel="canonical" href="/products/folio-ai"></head><body><script>window[Symbol.for("ApolloSSRDataTransport")].push({product:{name:"Folio AI",slug:"folio-ai"},commentsCount:2,comments:{pageInfo:{hasNextPage:false},edges:[{node:{__typename:"Comment",id:"2",bodyText:"Two"}}]}})</script></body></html>`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	comments, err := (Client{HTTP: server.Client(), ProductWebBase: server.URL}).FetchProductComments(ProductCommentsInput{Slug: "folio-ai", Limit: 20, Depth: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !comments.Complete || comments.ShownComments != 2 || len(comments.Comments) != 2 {
+		t.Fatalf("comments = %#v", comments)
 	}
 }
 

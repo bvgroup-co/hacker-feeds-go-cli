@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"html"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -17,8 +18,10 @@ const (
 	defaultProductBase      = "https://www.producthunt.com/feed"
 	defaultProductWebBase   = "https://www.producthunt.com"
 	defaultProductUserAgent = "hacker-feeds-go-cli/dev (+https://github.com/bvgroup-co/hacker-feeds-go-cli)"
+	defaultProductPageAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 	productHuntFeedSource   = "producthunt-feed"
 	productHuntPageSource   = "producthunt-public-page"
+	productCommentsPageCap  = 5
 )
 
 var (
@@ -35,7 +38,8 @@ var (
 	productUnquotedKeyRegex = regexp.MustCompile(`([\{\[,\s])([A-Za-z_$][A-Za-z0-9_$]*)(\s*:)`)
 	productUndefinedRegex   = regexp.MustCompile(`\bundefined\b`)
 	productUUIDRegex        = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
-	productCloudflareRegex  = regexp.MustCompile(`(?is)(cf-browser-verification|cf-challenge|challenge-platform|Just a moment\.\.\.|Attention Required! \| Cloudflare)`)
+	productCommentLinkRegex = regexp.MustCompile(`(?is)<a\b([^>]*)>`)
+	productCloudflareRegex  = regexp.MustCompile(`(?is)(cf-browser-verification|cf-chl-|cf-turnstile|cf-ray|cdn-cgi/challenge-platform/h/|Just a moment\.\.\.|Attention Required! \| Cloudflare|Enable JavaScript and cookies to continue)`)
 )
 
 type productAtomFeed struct {
@@ -84,6 +88,13 @@ type productMeta struct {
 	Image       string
 }
 
+type productPage struct {
+	Body       []byte
+	Header     http.Header
+	StatusCode int
+	Base       string
+}
+
 func (client Client) FetchProducts(count int, past int, now time.Time) ([]Product, error) {
 	if count <= 0 {
 		return nil, fmt.Errorf("count must be greater than 0")
@@ -116,16 +127,16 @@ func (client Client) FetchProductDetails(input ProductDetailsInput) (ProductDeta
 	if err != nil {
 		return ProductDetails{}, err
 	}
-	body, base, err := client.fetchProductPage(path)
+	page, err := client.fetchProductPage(path)
 	if err != nil {
 		return ProductDetails{}, err
 	}
-	if productPageBlocked(body) {
+	if productPageBlocked(page) {
 		return ProductDetails{}, fmt.Errorf("Product Hunt public page fetch was blocked by Cloudflare")
 	}
-	details := parseProductDetailsPage(body, base, slug)
+	details := parseProductDetailsPage(page.Body, page.Base, slug)
 	if details.ProductURL == "" {
-		details.ProductURL = base + path
+		details.ProductURL = page.Base + path
 	}
 	if details.Slug == "" {
 		details.Slug = slug
@@ -144,34 +155,98 @@ func (client Client) FetchProductComments(input ProductCommentsInput) (ProductCo
 	if err != nil {
 		return ProductComments{}, err
 	}
-	body, base, err := client.fetchProductPage(path)
+	page, err := client.fetchProductPage(path)
 	if err != nil {
 		return ProductComments{}, err
 	}
-	if productPageBlocked(body) {
+	if productPageBlocked(page) {
 		return ProductComments{}, fmt.Errorf("Product Hunt public page fetch was blocked by Cloudflare")
 	}
-	comments := parseProductCommentsPage(body, base, slug, input.Limit, input.Depth)
+	comments, err := client.fetchProductCommentsPages(page, path, slug, input.Limit, input.Depth)
+	if err != nil {
+		return ProductComments{}, err
+	}
 	comments.IncludeHTML = input.IncludeHTML
 	if comments.ProductURL == "" {
-		comments.ProductURL = base + path
+		comments.ProductURL = page.Base + path
 	}
 	return comments, nil
 }
 
-func (client Client) fetchProductPage(path string) ([]byte, string, error) {
+func (client Client) fetchProductCommentsPages(firstPage productPage, path string, slug string, limit int, depth int) (ProductComments, error) {
+	collector := newProductCommentCollector()
+	comments := parseProductCommentsPage(firstPage.Body, firstPage.Base, slug, limit, depth, collector)
+	visited := map[string]bool{path: true}
+	for _, nextPath := range productCommentPageLinks(firstPage.Body, path, slug) {
+		if len(visited) >= productCommentsPageCap {
+			break
+		}
+		if visited[nextPath] {
+			continue
+		}
+		visited[nextPath] = true
+		page, err := client.fetchProductPage(nextPath)
+		if err != nil {
+			return ProductComments{}, err
+		}
+		if productPageBlocked(page) {
+			break
+		}
+		comments = parseProductCommentsPage(page.Body, page.Base, slug, limit, depth, collector)
+	}
+	return comments, nil
+}
+
+func (client Client) fetchProductPage(path string) (productPage, error) {
 	base := strings.TrimRight(valueOrDefault(client.ProductWebBase, defaultProductWebBase), "/")
-	req, err := http.NewRequest(http.MethodGet, base+path, nil)
+	fetchPath := strings.Replace(path, "#comments", "", 1)
+	req, err := http.NewRequest(http.MethodGet, base+fetchPath, nil)
 	if err != nil {
-		return nil, "", err
+		return productPage{}, err
 	}
-	req.Header.Set("Accept", "text/html, application/xhtml+xml")
-	req.Header.Set("User-Agent", client.productUserAgent())
-	body, err := client.do(req)
+	client.setProductPageHeaders(req)
+	page, err := client.doProductPage(req, base)
 	if err != nil {
-		return nil, "", err
+		return productPage{}, err
 	}
-	return body, base, nil
+	return page, nil
+}
+
+func (client Client) doProductPage(req *http.Request, base string) (productPage, error) {
+	httpClient := client.HTTP
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	res, err := httpClient.Do(req)
+	if err != nil {
+		return productPage{}, err
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return productPage{}, err
+	}
+	page := productPage{Body: body, Header: res.Header, StatusCode: res.StatusCode, Base: base}
+	if res.StatusCode < 200 || res.StatusCode > 299 {
+		if productPageBlocked(page) {
+			return page, nil
+		}
+		return productPage{}, requestError{StatusCode: res.StatusCode, Body: responseSnippet(body), RetryAfter: res.Header.Get("Retry-After")}
+	}
+	return page, nil
+}
+
+func (client Client) setProductPageHeaders(req *http.Request) {
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Cache-Control", "no-cache")
+	req.Header.Set("Pragma", "no-cache")
+	req.Header.Set("Sec-Fetch-Dest", "document")
+	req.Header.Set("Sec-Fetch-Mode", "navigate")
+	req.Header.Set("Sec-Fetch-Site", "none")
+	req.Header.Set("Sec-Fetch-User", "?1")
+	req.Header.Set("Upgrade-Insecure-Requests", "1")
+	req.Header.Set("User-Agent", client.productPageUserAgent())
 }
 
 func NormalizeProductDetailsSlug(slug string) (string, error) {
@@ -265,14 +340,16 @@ func parseProductDetailsPage(body []byte, base string, requestedSlug string) Pro
 	return details
 }
 
-func parseProductCommentsPage(body []byte, base string, requestedSlug string, limit int, depth int) ProductComments {
+func parseProductCommentsPage(body []byte, base string, requestedSlug string, limit int, depth int, collector *productCommentCollector) ProductComments {
 	content := string(body)
 	details := ProductDetails{Slug: requestedSlug, Source: productHuntPageSource}
 	applyProductJSONLD(&details, content)
 	applyProductEmbeddedData(&details, content)
 	applyProductMeta(&details, content)
 	finalizeProductDetails(&details, base)
-	collector := productCommentCollector{seen: make(map[string]bool)}
+	if collector == nil {
+		collector = newProductCommentCollector()
+	}
 	for _, payload := range productEmbeddedPayloads(content) {
 		collector.walk(payload)
 	}
@@ -282,15 +359,20 @@ func parseProductCommentsPage(body []byte, base string, requestedSlug string, li
 		CommentsCount: details.CommentsCount,
 		Source:        productHuntPageSource,
 	}
+	collector.hasNextPage = collector.hasNextPage && comments.CommentsCount > countProductComments(collector.roots)
 	comments.Comments = limitProductCommentsDepth(limitProductComments(collector.roots, limit), depth)
 	comments.ShownComments = countProductComments(comments.Comments)
 	comments.Complete = comments.CommentsCount != 0 && comments.ShownComments >= comments.CommentsCount && !collector.hasNextPage
 	return comments
 }
 
+func newProductCommentCollector() *productCommentCollector {
+	return &productCommentCollector{seen: make(map[string]ProductComment)}
+}
+
 type productCommentCollector struct {
 	roots       []ProductComment
-	seen        map[string]bool
+	seen        map[string]ProductComment
 	hasNextPage bool
 }
 
@@ -299,10 +381,7 @@ func (collector *productCommentCollector) walk(value any) {
 	case map[string]any:
 		if stringValue(typed["__typename"]) == "Comment" {
 			comment := collector.commentFromMap(typed, "", 0)
-			if comment.ID != "" && !collector.seen[comment.ID] {
-				collector.seen[comment.ID] = true
-				collector.roots = append(collector.roots, comment)
-			}
+			collector.addRoot(comment)
 			return
 		}
 		if _, ok := typed["comments"]; ok {
@@ -324,6 +403,37 @@ func (collector *productCommentCollector) walk(value any) {
 			collector.walk(nested)
 		}
 	}
+}
+
+func (collector *productCommentCollector) addRoot(comment ProductComment) {
+	if !productCommentHasContent(comment) {
+		return
+	}
+	existing, ok := collector.seen[comment.ID]
+	if ok && !productCommentRicher(comment, existing) {
+		return
+	}
+	collector.seen[comment.ID] = comment
+	if ok {
+		replaceProductComment(collector.roots, comment)
+		return
+	}
+	collector.roots = append(collector.roots, comment)
+}
+
+func (collector *productCommentCollector) addReply(parent *ProductComment, reply ProductComment) {
+	if !productCommentHasContent(reply) {
+		return
+	}
+	existing, ok := collector.seen[reply.ID]
+	if ok && !productCommentRicher(reply, existing) {
+		return
+	}
+	collector.seen[reply.ID] = reply
+	if ok && replaceProductComment(collector.roots, reply) {
+		return
+	}
+	parent.Replies = append(parent.Replies, reply)
 }
 
 func (collector *productCommentCollector) commentFromMap(data map[string]any, parentID string, depth int) ProductComment {
@@ -354,13 +464,42 @@ func (collector *productCommentCollector) commentFromMap(data map[string]any, pa
 			continue
 		}
 		reply := collector.commentFromMap(replyMap, id, depth+1)
-		if reply.ID == "" || collector.seen[reply.ID] {
-			continue
-		}
-		collector.seen[reply.ID] = true
-		comment.Replies = append(comment.Replies, reply)
+		collector.addReply(&comment, reply)
 	}
 	return comment
+}
+
+func productCommentHasContent(comment ProductComment) bool {
+	return comment.ID != "" && (comment.BodyText != "" || comment.BodyHTML != "" || comment.AuthorName != "" || comment.Username != "" || comment.CreatedAt != "" || comment.Votes != 0 || comment.Hidden || comment.Deleted)
+}
+
+func productCommentRicher(candidate ProductComment, existing ProductComment) bool {
+	return productCommentScore(candidate) > productCommentScore(existing)
+}
+
+func productCommentScore(comment ProductComment) int {
+	score := len(comment.BodyText) + len(comment.BodyHTML) + len(comment.AuthorName) + len(comment.Username) + len(comment.CreatedAt)
+	if comment.Votes != 0 {
+		score += 4
+	}
+	if comment.Hidden || comment.Deleted {
+		score += 2
+	}
+	score += countProductComments(comment.Replies) * 8
+	return score
+}
+
+func replaceProductComment(comments []ProductComment, replacement ProductComment) bool {
+	for index := range comments {
+		if comments[index].ID == replacement.ID {
+			comments[index] = replacement
+			return true
+		}
+		if replaceProductComment(comments[index].Replies, replacement) {
+			return true
+		}
+	}
+	return false
 }
 
 func productCommentAuthor(data map[string]any) (string, string) {
@@ -394,6 +533,52 @@ func productReplyNodes(value any) []any {
 		}
 	}
 	return nodes
+}
+
+func productCommentPageLinks(body []byte, currentPath string, slug string) []string {
+	content := string(body)
+	links := make([]string, 0)
+	seen := make(map[string]bool)
+	for _, match := range productCommentLinkRegex.FindAllStringSubmatch(content, -1) {
+		attrs := parseHTMLAttrs(match[1])
+		href := strings.TrimSpace(attrs["href"])
+		if href == "" {
+			continue
+		}
+		path, ok := normalizeProductCommentPagePath(href, slug)
+		if !ok || path == currentPath || seen[path] {
+			continue
+		}
+		seen[path] = true
+		links = append(links, path)
+	}
+	return links
+}
+
+func normalizeProductCommentPagePath(href string, slug string) (string, bool) {
+	parsed, err := url.Parse(html.UnescapeString(strings.TrimSpace(href)))
+	if err != nil {
+		return "", false
+	}
+	if parsed.IsAbs() {
+		host := strings.ToLower(parsed.Hostname())
+		if host != "producthunt.com" && host != "www.producthunt.com" {
+			return "", false
+		}
+	}
+	segments := pathSegments(parsed.Path)
+	if len(segments) != 2 || segments[0] != "products" || segments[1] != slug {
+		return "", false
+	}
+	if parsed.Query().Get("page") == "" || parsed.Fragment != "comments" {
+		return "", false
+	}
+	path := parsed.EscapedPath()
+	if parsed.RawQuery != "" {
+		path += "?" + parsed.RawQuery
+	}
+	path += "#" + parsed.Fragment
+	return path, true
 }
 
 func limitProductComments(comments []ProductComment, limit int) []ProductComment {
@@ -860,8 +1045,14 @@ func balancedJSValue(content string, start int) (string, bool) {
 	return "", false
 }
 
-func productPageBlocked(body []byte) bool {
-	return productCloudflareRegex.Match(body)
+func productPageBlocked(page productPage) bool {
+	server := strings.ToLower(page.Header.Get("Server"))
+	cfRay := page.Header.Get("CF-Ray") != ""
+	cfMitigated := strings.ToLower(page.Header.Get("CF-Mitigated"))
+	statusBlocked := page.StatusCode == http.StatusForbidden || page.StatusCode == http.StatusTooManyRequests || page.StatusCode == http.StatusServiceUnavailable
+	headersBlocked := strings.Contains(server, "cloudflare") && statusBlocked || cfRay && statusBlocked || cfMitigated == "challenge"
+	bodyBlocked := productCloudflareRegex.Match(page.Body)
+	return headersBlocked || statusBlocked && bodyBlocked
 }
 
 func parseProductMeta(content string) productMeta {
@@ -1198,4 +1389,8 @@ func stripQuery(value string) string {
 
 func (client Client) productUserAgent() string {
 	return valueOrDefault(client.ProductUserAgent, defaultProductUserAgent)
+}
+
+func (client Client) productPageUserAgent() string {
+	return valueOrDefault(client.ProductUserAgent, defaultProductPageAgent)
 }
