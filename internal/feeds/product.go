@@ -350,6 +350,7 @@ func parseProductCommentsPage(body []byte, base string, requestedSlug string, li
 	if collector == nil {
 		collector = newProductCommentCollector()
 	}
+	collector.hasNextPage = false
 	for _, payload := range productEmbeddedPayloads(content) {
 		collector.walk(payload)
 	}
@@ -359,7 +360,6 @@ func parseProductCommentsPage(body []byte, base string, requestedSlug string, li
 		CommentsCount: details.CommentsCount,
 		Source:        productHuntPageSource,
 	}
-	collector.hasNextPage = collector.hasNextPage && comments.CommentsCount > countProductComments(collector.roots)
 	comments.Comments = limitProductCommentsDepth(limitProductComments(collector.roots, limit), depth)
 	comments.ShownComments = countProductComments(comments.Comments)
 	comments.Complete = comments.CommentsCount != 0 && comments.ShownComments >= comments.CommentsCount && !collector.hasNextPage
@@ -384,16 +384,8 @@ func (collector *productCommentCollector) walk(value any) {
 			collector.addRoot(comment)
 			return
 		}
-		if _, ok := typed["comments"]; ok {
-			collector.walk(typed["comments"])
-			return
-		}
-		if _, ok := typed["replies"]; ok && typed["edges"] == nil {
-			collector.walk(typed["replies"])
-			return
-		}
-		if boolValue(typed["hasNextPage"]) {
-			collector.hasNextPage = true
+		if value, ok := typed["hasNextPage"].(bool); ok {
+			collector.hasNextPage = value
 		}
 		for _, nested := range typed {
 			collector.walk(nested)

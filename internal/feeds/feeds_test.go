@@ -635,6 +635,13 @@ func TestParseProductCommentsLimitDepthAndComplete(t *testing.T) {
 	}
 }
 
+func TestParseProductCommentsPreservesHasNextPageSibling(t *testing.T) {
+	comments := parseProductCommentsPage([]byte(`<html><script>window[Symbol.for("ApolloSSRDataTransport")].push({product:{name:"Folio AI",slug:"folio-ai"},commentsCount:1,comments:{pageInfo:{hasNextPage:true},edges:[{node:{__typename:"Comment",id:"1",bodyText:"One"}}]},metadata:{ignored:true}})</script></html>`), "https://www.producthunt.com", "folio-ai", 20, 3, nil)
+	if comments.Complete || comments.ShownComments != 1 || len(comments.Comments) != 1 {
+		t.Fatalf("comments = %#v", comments)
+	}
+}
+
 func TestProductPageBlocked(t *testing.T) {
 	falseBlock := productPage{StatusCode: http.StatusOK, Header: http.Header{}, Body: []byte(`<html><script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script><script>window[Symbol.for("ApolloSSRDataTransport")].push({commentsCount:1})</script></html>`)}
 	if productPageBlocked(falseBlock) {
