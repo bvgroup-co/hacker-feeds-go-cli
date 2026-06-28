@@ -86,11 +86,35 @@ func Product(writer io.Writer, labels i18n.Labels, products []feeds.Product) {
 
 func ProductDetails(writer io.Writer, labels i18n.Labels, details feeds.ProductDetails) {
 	header(writer, labels.Product.DetailsHeader)
+	if details.ProductID != "" {
+		fmt.Fprintf(writer, "Product ID: %s\n", details.ProductID)
+	}
+	if details.PostID != "" {
+		fmt.Fprintf(writer, "Post ID: %s\n", details.PostID)
+	}
+	if details.PostSlug != "" {
+		fmt.Fprintf(writer, "Launch slug: %s\n", details.PostSlug)
+	}
 	if details.Name != "" {
 		fmt.Fprintf(writer, "%s: %s\n", labels.Product.Name, details.Name)
 	}
 	if details.LaunchName != "" {
 		fmt.Fprintf(writer, "Launch name: %s\n", details.LaunchName)
+	}
+	if details.LaunchState != "" {
+		fmt.Fprintf(writer, "Launch state: %s\n", details.LaunchState)
+	}
+	if details.LaunchNumber != 0 {
+		fmt.Fprintf(writer, "Launch number: %d\n", details.LaunchNumber)
+	}
+	if details.DailyRank != 0 {
+		fmt.Fprintf(writer, "Daily rank: %d\n", details.DailyRank)
+	}
+	if details.WeeklyRank != 0 {
+		fmt.Fprintf(writer, "Weekly rank: %d\n", details.WeeklyRank)
+	}
+	if details.MonthlyRank != 0 {
+		fmt.Fprintf(writer, "Monthly rank: %d\n", details.MonthlyRank)
 	}
 	if details.Tagline != "" {
 		fmt.Fprintf(writer, "Tagline: %s\n", details.Tagline)
@@ -107,6 +131,12 @@ func ProductDetails(writer io.Writer, labels i18n.Labels, details feeds.ProductD
 	if details.CleanDomain != "" {
 		fmt.Fprintf(writer, "Clean domain: %s\n", details.CleanDomain)
 	}
+	if details.LogoURL != "" {
+		fmt.Fprintf(writer, "Logo URL: %s\n", details.LogoURL)
+	}
+	if details.ThumbnailURL != "" {
+		fmt.Fprintf(writer, "Thumbnail URL: %s\n", details.ThumbnailURL)
+	}
 	if details.VotesKnown {
 		fmt.Fprintf(writer, "%s: %d\n", labels.Product.Votes, details.Votes)
 	} else {
@@ -114,6 +144,9 @@ func ProductDetails(writer io.Writer, labels i18n.Labels, details feeds.ProductD
 	}
 	if details.CommentsCount != 0 {
 		fmt.Fprintf(writer, "Comments count: %d\n", details.CommentsCount)
+	}
+	if details.PostsCount != 0 {
+		fmt.Fprintf(writer, "Posts count: %d\n", details.PostsCount)
 	}
 	if details.ReviewsCount != 0 {
 		fmt.Fprintf(writer, "Reviews count: %d\n", details.ReviewsCount)
@@ -124,11 +157,77 @@ func ProductDetails(writer io.Writer, labels i18n.Labels, details feeds.ProductD
 	if details.FollowersCount != 0 {
 		fmt.Fprintf(writer, "Followers count: %d\n", details.FollowersCount)
 	}
+	if details.CreatedAt != "" {
+		fmt.Fprintf(writer, "Created at: %s\n", details.CreatedAt)
+	}
+	if details.PublishedAt != "" {
+		fmt.Fprintf(writer, "Featured at: %s\n", details.PublishedAt)
+	}
+	if details.ScheduledAt != "" {
+		fmt.Fprintf(writer, "Scheduled at: %s\n", details.ScheduledAt)
+	}
+	if details.UpdatedAt != "" {
+		fmt.Fprintf(writer, "Updated at: %s\n", details.UpdatedAt)
+	}
 	writeProductMakers(writer, details.Makers)
 	writeProductTopics(writer, details.Topics)
 	writeProductMedia(writer, details.Media)
 	fmt.Fprintf(writer, "Source: %s\n", details.Source)
 	separator(writer)
+}
+
+func ProductComments(writer io.Writer, labels i18n.Labels, comments feeds.ProductComments) {
+	header(writer, "Product Hunt Comments")
+	if comments.ProductName != "" {
+		fmt.Fprintf(writer, "%s: %s\n", labels.Product.Name, comments.ProductName)
+	}
+	if comments.ProductURL != "" {
+		fmt.Fprintf(writer, "%s: %s\n", labels.Product.ProductURL, comments.ProductURL)
+	}
+	fmt.Fprintf(writer, "Comments count: %d\n", comments.CommentsCount)
+	fmt.Fprintf(writer, "Shown comments: %d\n", comments.ShownComments)
+	complete := "no"
+	if comments.Complete {
+		complete = "yes"
+	}
+	fmt.Fprintf(writer, "Complete: %s\n", complete)
+	fmt.Fprintln(writer, "Note: Product Hunt public HTML embeds only the initial comment page; more comments may exist.")
+	separator(writer)
+	for _, comment := range comments.Comments {
+		writeProductComment(writer, comment, comments.IncludeHTML)
+	}
+}
+
+func writeProductComment(writer io.Writer, comment feeds.ProductComment, includeHTML bool) {
+	indent := ""
+	for range comment.Depth {
+		indent += "  "
+	}
+	author := comment.AuthorName
+	if comment.Username != "" {
+		author += " (@" + comment.Username + ")"
+	}
+	if author == "" {
+		author = "unknown"
+	}
+	status := ""
+	if comment.Hidden {
+		status += " · hidden"
+	}
+	if comment.Deleted {
+		status += " · deleted"
+	}
+	fmt.Fprintf(writer, "%s[%s] %s · %s · %d votes%s\n", indent, comment.ID, author, comment.CreatedAt, comment.Votes, status)
+	if comment.BodyText != "" {
+		fmt.Fprintf(writer, "%s%s\n", indent, comment.BodyText)
+	}
+	if includeHTML && comment.BodyHTML != "" {
+		fmt.Fprintf(writer, "%sHTML: %s\n", indent, comment.BodyHTML)
+	}
+	fmt.Fprintln(writer)
+	for _, reply := range comment.Replies {
+		writeProductComment(writer, reply, includeHTML)
+	}
 }
 
 func writeProductMakers(writer io.Writer, makers []feeds.ProductMaker) {
@@ -143,9 +242,15 @@ func writeProductMakers(writer io.Writer, makers []feeds.ProductMaker) {
 		}
 		if maker.URL != "" {
 			fmt.Fprintf(writer, "- %s: %s\n", name, maker.URL)
-			continue
+		} else {
+			fmt.Fprintf(writer, "- %s\n", name)
 		}
-		fmt.Fprintf(writer, "- %s\n", name)
+		if maker.Headline != "" {
+			fmt.Fprintf(writer, "  Headline: %s\n", maker.Headline)
+		}
+		if maker.ImageURL != "" {
+			fmt.Fprintf(writer, "  Image URL: %s\n", maker.ImageURL)
+		}
 	}
 }
 

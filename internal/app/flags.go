@@ -81,6 +81,45 @@ func parseProductDetailsFlags(args []string) (map[string]string, error) {
 	return values, nil
 }
 
+func parseProductCommentsFlags(args []string) (map[string]string, error) {
+	values := map[string]string{"--url": "", "--slug": "", "--limit": "20", "--depth": "3", "--include-html": "false"}
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		if arg == "--include-html" {
+			values["--include-html"] = "true"
+			continue
+		}
+		if strings.HasPrefix(arg, "--") && strings.Contains(arg, "=") {
+			parts := strings.SplitN(arg, "=", 2)
+			switch parts[0] {
+			case "--url", "--slug", "--limit", "--depth":
+				values[parts[0]] = parts[1]
+			case "--include-html":
+				return nil, fmt.Errorf("--include-html does not accept a value")
+			default:
+				return nil, fmt.Errorf("unknown flag: %s", parts[0])
+			}
+			continue
+		}
+		switch arg {
+		case "--url", "--slug", "--limit", "--depth":
+			if index+1 >= len(args) {
+				return nil, fmt.Errorf("%s requires a value", arg)
+			}
+			values[arg] = args[index+1]
+			index++
+		case "--count", "-c", "--past", "-p":
+			return nil, fmt.Errorf("%s is not supported in product comments mode", arg)
+		default:
+			if strings.HasPrefix(arg, "-") {
+				return nil, fmt.Errorf("unknown flag: %s", arg)
+			}
+			return nil, fmt.Errorf("unexpected argument: %s", arg)
+		}
+	}
+	return values, nil
+}
+
 func hasAnyFlag(args []string, names ...string) bool {
 	lookup := make(map[string]bool, len(names))
 	for _, name := range names {

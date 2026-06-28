@@ -563,7 +563,7 @@ func TestParseProductDetailsJSONLDAndEmbeddedData(t *testing.T) {
 	if !details.VotesKnown || details.Votes != 123 || details.CommentsCount != 9 || details.FollowersCount != 77 || details.ReviewsCount != 4 || details.ReviewsRating != 4.5 {
 		t.Fatalf("counts = %#v", details)
 	}
-	if len(details.Makers) != 1 || details.Makers[0].Name != "Ada" || len(details.Topics) != 1 || details.Topics[0].Slug != "artificial-intelligence" || len(details.Media) != 2 {
+	if len(details.Makers) != 1 || details.Makers[0].Name != "Ada" || len(details.Topics) != 1 || details.Topics[0].Slug != "artificial-intelligence" || len(details.Media) != 3 || details.LogoURL == "" || details.DailyRank != 1 || details.PostsCount != 2 {
 		t.Fatalf("collections = %#v", details)
 	}
 }
@@ -600,6 +600,55 @@ func TestParseProductDetailsMetaOnlyFallback(t *testing.T) {
 	}
 }
 
+func TestParseProductCommentsApolloData(t *testing.T) {
+	comments := parseProductCommentsPage([]byte(productCommentsHTML()), "https://www.producthunt.com", "folio-ai", 20, 2)
+	if comments.ProductName != "Folio AI" || comments.CommentsCount != 3 || comments.ShownComments != 2 || comments.Complete {
+		t.Fatalf("summary = %#v", comments)
+	}
+	if len(comments.Comments) != 1 {
+		t.Fatalf("comments = %#v", comments.Comments)
+	}
+	root := comments.Comments[0]
+	if root.ID != "5483831" || root.AuthorName != "Aymeric Roucher" || root.Username != "aymericroucher" || root.BodyText != "Root comment" || root.Votes != 8 || root.Depth != 0 {
+		t.Fatalf("root = %#v", root)
+	}
+	if len(root.Replies) != 1 || root.Replies[0].ID != "5487521" || root.Replies[0].ParentID != "5483831" || root.Replies[0].BodyText != "Reply text" || root.Replies[0].Depth != 1 {
+		t.Fatalf("reply = %#v", root.Replies)
+	}
+}
+
+func TestParseProductApolloUnquotedKeys(t *testing.T) {
+	comments := parseProductCommentsPage([]byte(`<html><script>window[Symbol.for("ApolloSSRDataTransport")].push({product:{name:"Folio AI",slug:"folio-ai"},commentsCount:1,comments:{pageInfo:{hasNextPage:false},edges:[{node:{__typename:"Comment",id:"1",bodyText:undefined,user:{name:"Ada"}}}]}})</script></html>`), "https://www.producthunt.com", "folio-ai", 20, 2)
+	if comments.CommentsCount != 1 || len(comments.Comments) != 1 || comments.Comments[0].ID != "1" || comments.Comments[0].AuthorName != "Ada" {
+		t.Fatalf("comments = %#v", comments)
+	}
+}
+
+func TestParseProductCommentsLimitDepthAndComplete(t *testing.T) {
+	comments := parseProductCommentsPage([]byte(productCommentsHTML()), "https://www.producthunt.com", "folio-ai", 1, 1)
+	if comments.ShownComments != 1 || len(comments.Comments) != 1 || len(comments.Comments[0].Replies) != 0 {
+		t.Fatalf("limited = %#v", comments)
+	}
+	complete := parseProductCommentsPage([]byte(productCompleteCommentsHTML()), "https://www.producthunt.com", "folio-ai", 20, 3)
+	if !complete.Complete || complete.ShownComments != 2 {
+		t.Fatalf("complete = %#v", complete)
+	}
+}
+
+func TestProductPageBlocked(t *testing.T) {
+	if !productPageBlocked([]byte(`<html><title>Just a moment...</title><div id="cf-challenge"></div></html>`)) {
+		t.Fatal("expected Cloudflare challenge detection")
+	}
+}
+
 func productDetailsHTML() string {
-	return `<html><head><title>Fallback Title | Product Hunt</title><meta name="description" content="Meta description"><script type="application/ld+json">{"name":"Folio AI","description":"JSON-LD description","url":"https://www.producthunt.com/products/folio-ai","image":"https://img.example/cover.png","author":[{"name":"Ada","url":"https://www.producthunt.com/@ada"}],"aggregateRating":{"ratingValue":"4.5","reviewCount":"4"}}</script></head><body><script>self.__next_f.push([1,{"product":{"name":"Folio AI","slug":"folio-ai","websiteUrl":"https://folio.example/?utm=ph","cleanUrl":"folio.example"},"launch":{"name":"Folio AI Launch","tagline":"AI portfolio builder","description":"Launch description","latestScore":123,"commentsCount":9,"followersCount":77,"reviewsCount":4,"reviewsRating":4.5,"featuredAt":"2026-06-01T00:00:00Z"},"topics":{"edges":[{"node":{"name":"Artificial Intelligence","slug":"artificial-intelligence"}}]},"media":[{"url":"https://img.example/screen.png","type":"image"}]}])</script></body></html>`
+	return `<html><head><title>Fallback Title | Product Hunt</title><meta name="description" content="Meta description"><script type="application/ld+json">{"name":"Folio AI","description":"JSON-LD description","url":"https://www.producthunt.com/products/folio-ai","image":"https://img.example/cover.png","author":[{"name":"Ada","url":"https://www.producthunt.com/@ada"}],"aggregateRating":{"ratingValue":"4.5","reviewCount":"4"}}</script></head><body><script>self.__next_f.push([1,{"product":{"name":"Folio AI","slug":"folio-ai","websiteUrl":"https://folio.example/?utm=ph","cleanUrl":"folio.example","logoUuid":"11111111-1111-1111-1111-111111111111","postsCount":2},"launch":{"id":"post-1","slug":"folio-ai-launch","name":"Folio AI Launch","state":"featured","tagline":"AI portfolio builder","description":"Launch description","latestScore":123,"commentsCount":9,"followersCount":77,"reviewsCount":4,"reviewsRating":4.5,"featuredAt":"2026-06-01T00:00:00Z","dailyRank":1},"topics":{"edges":[{"node":{"name":"Artificial Intelligence","slug":"artificial-intelligence"}}]},"media":[{"url":"https://img.example/screen.png","type":"image"},{"uuid":"22222222-2222-2222-2222-222222222222","type":"thumbnail"}]}])</script></body></html>`
+}
+
+func productCommentsHTML() string {
+	return `<html><head><title>Folio AI | Product Hunt</title><link rel="canonical" href="/products/folio-ai"></head><body><script>window[Symbol.for("ApolloSSRDataTransport")].push({"product":{"name":"Folio AI","slug":"folio-ai"},"commentsCount":3,"comments":{"pageInfo":{"hasNextPage":true},"edges":[{"node":{"__typename":"Comment","id":"5483831","bodyHtml":"<p>Root <strong>comment</strong></p>","bodyText":undefined,"votesCount":8,"createdAt":"2026-06-25T13:15:58-07:00","user":{"name":"Aymeric Roucher","username":"aymericroucher"},"replies":{"edges":[{"node":{"__typename":"Comment","id":"5487521","bodyHtml":"<p>Reply text</p>","votesCount":5,"createdAt":"2026-06-27T04:20:26-07:00","user":{"name":"David","username":"david_marko"}}}]}}},{"node":{"__typename":"Comment","id":"5483831","bodyText":"Duplicate"}}]},"ads":[{"__typename":"Product","name":"Ad Product"}]})</script></body></html>`
+}
+
+func productCompleteCommentsHTML() string {
+	return `<html><head><title>Folio AI | Product Hunt</title><link rel="canonical" href="/products/folio-ai"></head><body><script>window[Symbol.for("ApolloSSRDataTransport")].push({"product":{"name":"Folio AI","slug":"folio-ai"},"commentsCount":2,"comments":{"pageInfo":{"hasNextPage":false},"edges":[{"node":{"__typename":"Comment","id":"1","bodyText":"One"}},{"node":{"__typename":"Comment","id":"2","bodyText":"Two"}}]}})</script></body></html>`
 }

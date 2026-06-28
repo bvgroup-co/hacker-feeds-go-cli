@@ -232,6 +232,9 @@ func (app App) product(args []string, labels i18n.Labels) error {
 	if len(args) > 0 && args[0] == "details" {
 		return app.productDetails(args[1:], labels)
 	}
+	if len(args) > 0 && args[0] == "comments" {
+		return app.productComments(args[1:], labels)
+	}
 	if hasAnyFlag(args, "--details") {
 		filtered := make([]string, 0, len(args)-1)
 		for _, arg := range args {
@@ -281,6 +284,31 @@ func (app App) productDetails(args []string, labels i18n.Labels) error {
 		return err
 	}
 	output.ProductDetails(app.Out, labels, details)
+	return nil
+}
+
+func (app App) productComments(args []string, labels i18n.Labels) error {
+	if wantsHelp(args) {
+		app.printCommandHelp(app.Out, []string{"product", "comments"})
+		return nil
+	}
+	flags, err := parseProductCommentsFlags(args)
+	if err != nil {
+		return err
+	}
+	limit, err := feeds.ParsePositiveInt("--limit", flags["--limit"])
+	if err != nil {
+		return err
+	}
+	depth, err := feeds.ParsePositiveInt("--depth", flags["--depth"])
+	if err != nil {
+		return err
+	}
+	comments, err := app.client().FetchProductComments(feeds.ProductCommentsInput{URL: flags["--url"], Slug: flags["--slug"], Limit: limit, Depth: depth, IncludeHTML: flags["--include-html"] == "true"})
+	if err != nil {
+		return err
+	}
+	output.ProductComments(app.Out, labels, comments)
 	return nil
 }
 
@@ -420,6 +448,8 @@ func (app App) printCommandHelp(writer io.Writer, command []string) {
 		fmt.Fprintln(writer, "  hfeeds product --details --slug product_slug")
 		fmt.Fprintln(writer, "  hfeeds product details --url product_url")
 		fmt.Fprintln(writer, "  hfeeds product details --slug product_slug")
+		fmt.Fprintln(writer, "  hfeeds product comments --url product_url [--limit n] [--depth n] [--include-html]")
+		fmt.Fprintln(writer, "  hfeeds product comments --slug product_slug [--limit n] [--depth n] [--include-html]")
 	case "product details":
 		fmt.Fprintln(writer, "Usage:")
 		fmt.Fprintln(writer, "  hfeeds product details --url product_url")
@@ -429,6 +459,18 @@ func (app App) printCommandHelp(writer io.Writer, command []string) {
 		fmt.Fprintln(writer, "  --url        Product Hunt product or post URL")
 		fmt.Fprintln(writer, "  --slug       Product Hunt slug")
 		fmt.Fprintln(writer, "  -h, --help   display help")
+	case "product comments":
+		fmt.Fprintln(writer, "Usage:")
+		fmt.Fprintln(writer, "  hfeeds product comments --url product_url [--limit n] [--depth n] [--include-html]")
+		fmt.Fprintln(writer, "  hfeeds product comments --slug product_slug [--limit n] [--depth n] [--include-html]")
+		fmt.Fprintln(writer)
+		fmt.Fprintln(writer, "Options:")
+		fmt.Fprintln(writer, "  --url           Product Hunt product or post URL")
+		fmt.Fprintln(writer, "  --slug          Product Hunt slug")
+		fmt.Fprintln(writer, "  --limit         maximum comments to print, default 20")
+		fmt.Fprintln(writer, "  --depth         maximum comment depth, default 3")
+		fmt.Fprintln(writer, "  --include-html  include original HTML body")
+		fmt.Fprintln(writer, "  -h, --help      display help")
 	case "reddit":
 		fmt.Fprintln(writer, "Usage:")
 		fmt.Fprintln(writer, "  hfeeds reddit [-t topic] [-c limit]")

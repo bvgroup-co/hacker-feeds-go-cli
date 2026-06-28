@@ -73,6 +73,8 @@ hfeeds product --details --slug product_slug
 hfeeds product --details --url product_url
 hfeeds product details --slug product_slug
 hfeeds product details --url product_url
+hfeeds product comments --slug product_slug [--limit n] [--depth n] [--include-html]
+hfeeds product comments --url product_url [--limit n] [--depth n] [--include-html]
 hfeeds reddit [-t topic] [-c limit]
 hfeeds reddit comments --topic topic --post post_id [--limit n] [--depth n]
 hfeeds v2ex [-n node]
@@ -89,6 +91,8 @@ hfeeds news comments --id 123456 --limit 20 --depth 3
 hfeeds product --count 5 --past 1
 hfeeds product --details --slug folio-ai
 hfeeds product details --url https://www.producthunt.com/products/folio-ai
+hfeeds product comments --slug folio-ai --limit 20 --depth 2
+hfeeds product comments --url https://www.producthunt.com/products/folio-ai --include-html
 hfeeds reddit --topic golang
 hfeeds reddit comments --topic golang --post abc123 --limit 10 --depth 2
 hfeeds v2ex --node programmer
@@ -115,7 +119,9 @@ Running `hfeeds config` without `--lang` in a non-interactive environment exits 
 
 Product Hunt list mode uses the public Atom feed at `https://www.producthunt.com/feed` and does not require credentials. Votes are not available from the public feed, so the CLI marks them as unavailable instead of printing a misleading count.
 
-Product Hunt details mode fetches public Product Hunt product pages and parses public HTML metadata, JSON-LD, and embedded page data. It does not use the Product Hunt API, does not require credentials, and does not send an `Authorization` header. Votes may be available on public pages, but the CLI marks them unavailable when votes are hidden or not rendered.
+Product Hunt details and comments modes fetch public Product Hunt product pages and parse public HTML metadata, JSON-LD, and embedded page data. They do not use the Product Hunt API, do not require a Product Hunt token, and do not send an `Authorization` header. Votes may be available on public pages, but the CLI marks them unavailable when votes are hidden or not rendered.
+
+`hfeeds product comments --slug folio-ai --limit 20 --depth 2` reads comments from embedded public page data, preserves reply nesting, and derives plain text from Product Hunt comment HTML when needed. Add `--include-html` to print the original comment HTML body along with plain text. Without authentication, Product Hunt may expose only the initial comment page; the CLI prints `Complete: no` when more comments likely exist. Product Hunt may also block public page fetches with Cloudflare, and the CLI reports that clearly instead of returning empty output.
 
 ### Hacker News access
 
