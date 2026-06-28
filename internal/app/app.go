@@ -478,6 +478,13 @@ func (app App) printCommandHelp(writer io.Writer, command []string) {
 	case "reddit comments":
 		fmt.Fprintln(writer, "Usage:")
 		fmt.Fprintln(writer, "  hfeeds reddit comments --topic topic --post post_id [--limit n] [--depth n]")
+		fmt.Fprintln(writer)
+		fmt.Fprintln(writer, "Options:")
+		fmt.Fprintln(writer, "  -t, --topic  subreddit/topic, default popular")
+		fmt.Fprintln(writer, "  -p, --post   Reddit post ID")
+		fmt.Fprintln(writer, "  -c, --limit  maximum comments to print, default 10")
+		fmt.Fprintln(writer, "  -d, --depth  maximum comment depth, default 2")
+		fmt.Fprintln(writer, "  -h, --help   display help")
 	case "v2ex":
 		fmt.Fprintln(writer, "Usage:")
 		fmt.Fprintln(writer, "  hfeeds v2ex [-n node]")
