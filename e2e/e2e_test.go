@@ -182,7 +182,7 @@ func TestProductRedditV2EXE2E(t *testing.T) {
 		_, _ = writer.Write([]byte(productE2EAtom()))
 	}))
 	defer productServer.Close()
-	result := run(t, []string{"product", "-c", "2", "-p", "1"}, []string{"HFEEDS_PRODUCT_HUNT_BASE_URL=" + productServer.URL})
+	result := run(t, []string{"product", "-c", "2"}, []string{"HFEEDS_PRODUCT_HUNT_BASE_URL=" + productServer.URL})
 	if result.code != 0 || !strings.Contains(result.stdout, "Product Hunt List") || !strings.Contains(result.stdout, "Votes: unavailable from public feed") || strings.Contains(result.stdout, "?ref=x") {
 		t.Fatalf("product = %#v", result)
 	}
@@ -203,6 +203,18 @@ func TestProductRedditV2EXE2E(t *testing.T) {
 	result = run(t, []string{"product", "details", "--url", "https://www.producthunt.com/products/folio-ai"}, []string{"HFEEDS_PRODUCT_HUNT_WEB_BASE_URL=" + productDetailsServer.URL})
 	if result.code != 0 || !strings.Contains(result.stdout, "Product URL: "+productDetailsServer.URL+"/products/folio-ai") {
 		t.Fatalf("product details url = %#v", result)
+	}
+	result = run(t, []string{"product", "comments", "--slug", "folio-ai"}, []string{"HFEEDS_PRODUCT_HUNT_WEB_BASE_URL=" + productDetailsServer.URL})
+	if result.code != 0 || !strings.Contains(result.stdout, "Product Hunt Comments") || !strings.Contains(result.stdout, "Root comment") || !strings.Contains(result.stdout, "  [5487521]") {
+		t.Fatalf("product comments slug = %#v", result)
+	}
+	result = run(t, []string{"product", "comments", "--url", "https://www.producthunt.com/products/folio-ai", "--limit", "5", "--depth", "1"}, []string{"HFEEDS_PRODUCT_HUNT_WEB_BASE_URL=" + productDetailsServer.URL})
+	if result.code != 0 || !strings.Contains(result.stdout, "Shown comments: 1") || strings.Contains(result.stdout, "Reply text") {
+		t.Fatalf("product comments url limited = %#v", result)
+	}
+	result = run(t, []string{"product", "comments", "--slug", "folio-ai", "--include-html"}, []string{"HFEEDS_PRODUCT_HUNT_WEB_BASE_URL=" + productDetailsServer.URL})
+	if result.code != 0 || !strings.Contains(result.stdout, "HTML: <p>Root <strong>comment</strong></p>") {
+		t.Fatalf("product comments html = %#v", result)
 	}
 	home := writeLang(t, "zh")
 	result = run(t, []string{"product"}, []string{"HOME=" + home, "HFEEDS_PRODUCT_HUNT_BASE_URL=" + productServer.URL})
@@ -446,7 +458,7 @@ func productE2EAtom() string {
 }
 
 func productE2EDetailsHTML() string {
-	return `<html><head><title>Folio AI | Product Hunt</title><meta name="description" content="AI portfolio builder"><link rel="canonical" href="/products/folio-ai"></head><body><script>self.__next_f.push([1,{"product":{"name":"Folio AI","slug":"folio-ai"},"launch":{"description":"Build a portfolio with AI","tagline":"AI portfolio builder"}}])</script></body></html>`
+	return `<html><head><title>Folio AI | Product Hunt</title><meta name="description" content="AI portfolio builder"><link rel="canonical" href="/products/folio-ai"></head><body><script>window[Symbol.for("ApolloSSRDataTransport")].push({"product":{"name":"Folio AI","slug":"folio-ai"},"launch":{"description":"Build a portfolio with AI","tagline":"AI portfolio builder","commentsCount":2},"comments":{"pageInfo":{"hasNextPage":false},"edges":[{"node":{"__typename":"Comment","id":"5483831","bodyHtml":"<p>Root <strong>comment</strong></p>","votesCount":8,"createdAt":"2026-06-25T13:15:58-07:00","user":{"name":"Aymeric Roucher","username":"aymericroucher"},"replies":{"edges":[{"node":{"__typename":"Comment","id":"5487521","bodyText":"Reply text","votesCount":5,"createdAt":"2026-06-27T04:20:26-07:00","user":{"name":"David","username":"david_marko"}}}]}}}]}})</script></body></html>`
 }
 
 func redditE2EArcticTree() string {

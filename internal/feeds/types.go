@@ -69,13 +69,23 @@ type ProductDetailsInput struct {
 
 type ProductDetails struct {
 	Slug           string
+	ProductID      string
+	PostID         string
+	PostSlug       string
 	Name           string
 	LaunchName     string
+	LaunchState    string
+	LaunchNumber   int
+	DailyRank      int
+	WeeklyRank     int
+	MonthlyRank    int
 	Tagline        string
 	Description    string
 	ProductURL     string
 	WebsiteURL     string
 	CleanDomain    string
+	LogoURL        string
+	ThumbnailURL   string
 	Makers         []ProductMaker
 	Topics         []ProductTopic
 	Media          []ProductMedia
@@ -83,18 +93,57 @@ type ProductDetails struct {
 	VotesKnown     bool
 	VotesHidden    bool
 	CommentsCount  int
+	PostsCount     int
 	ReviewsCount   int
 	ReviewsRating  float64
 	FollowersCount int
+	CreatedAt      string
 	PublishedAt    string
+	ScheduledAt    string
 	UpdatedAt      string
 	Source         string
+}
+
+type ProductCommentsInput struct {
+	URL         string
+	Slug        string
+	Limit       int
+	Depth       int
+	IncludeHTML bool
+}
+
+type ProductComments struct {
+	ProductName   string
+	ProductURL    string
+	CommentsCount int
+	ShownComments int
+	Complete      bool
+	IncludeHTML   bool
+	Comments      []ProductComment
+	Source        string
+}
+
+type ProductComment struct {
+	ID         string
+	ParentID   string
+	AuthorName string
+	Username   string
+	BodyText   string
+	BodyHTML   string
+	Votes      int
+	CreatedAt  string
+	Hidden     bool
+	Deleted    bool
+	Depth      int
+	Replies    []ProductComment
 }
 
 type ProductMaker struct {
 	Name     string `json:"name"`
 	Username string `json:"username"`
 	URL      string `json:"url"`
+	Headline string `json:"headline"`
+	ImageURL string `json:"imageUrl"`
 }
 
 type ProductTopic struct {
