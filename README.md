@@ -98,6 +98,106 @@ hfeeds reddit comments --topic golang --post abc123 --limit 10 --depth 2
 hfeeds v2ex --node programmer
 ```
 
+## Max info workflow
+
+Use this workflow when you want the most information currently available from each source. Start with a list command, copy the identifier printed in that output, then run the matching detail, discussion, or comments command when one exists.
+
+Discovery commands:
+
+```sh
+hfeeds --help
+hfeeds help github
+hfeeds help news
+hfeeds help product
+hfeeds help product comments
+hfeeds help news discussion
+hfeeds help reddit comments
+hfeeds help v2ex
+```
+
+### GitHub Trending
+
+List trending repositories:
+
+```sh
+hfeeds github
+hfeeds github --since weekly --lang go
+```
+
+GitHub Trending output is the full current CLI view for this source: repository name, description, language, stars, forks, stars for the selected period, and URL when available. There is no separate GitHub detail, discussion, or comments subcommand.
+
+### Hacker News
+
+List stories and copy the printed Hacker News item ID:
+
+```sh
+hfeeds news --top 10
+```
+
+Fetch the discussion tree for that item ID:
+
+```sh
+hfeeds news discussion --id 123456 --limit 50 --depth 4
+hfeeds news comments --id 123456 --limit 50 --depth 4
+```
+
+`hfeeds news comments` is an alias for `hfeeds news discussion`. `--limit` caps the total number of comments printed, and `--depth` caps reply nesting. Hacker News uses the public Firebase API and does not require credentials.
+
+### Product Hunt
+
+List products from the public Product Hunt Atom feed and copy a product slug or URL:
+
+```sh
+hfeeds product --count 10 --past 0
+```
+
+Fetch rich public product details by slug or by Product Hunt product/post URL:
+
+```sh
+hfeeds product details --slug folio-ai
+hfeeds product details --url https://www.producthunt.com/products/folio-ai
+hfeeds product --details --slug folio-ai
+hfeeds product --details --url https://www.producthunt.com/products/folio-ai
+```
+
+Fetch public comments by slug or URL:
+
+```sh
+hfeeds product comments --slug folio-ai --limit 50 --depth 4
+hfeeds product comments --url https://www.producthunt.com/products/folio-ai --limit 50 --depth 4 --include-html
+```
+
+Product Hunt list, details, and comments modes use public feed/page data only. No Product Hunt token, API key, login, or OAuth flow is required, and the CLI does not send an `Authorization` header. Comments preserve nested replies; `--limit` caps the total comments printed, `--depth` caps reply nesting, and `--include-html` prints the original public HTML body along with plain text.
+
+For comments, Product Hunt may expose only the initial public comment page without authentication or may indicate that more public comment pages exist. In those cases the CLI prints `Complete: no` to show that more comments may exist or that not everything was fetched.
+
+### Reddit
+
+List posts for a subreddit/topic and copy the printed post ID:
+
+```sh
+hfeeds reddit --topic golang --limit 10
+```
+
+Fetch the nested discussion/comments for that subreddit and post ID:
+
+```sh
+hfeeds reddit comments --topic golang --post abc123 --limit 50 --depth 4
+```
+
+Reddit comments preserve nested replies. `--limit` caps the total number of comments printed, and `--depth` caps reply nesting. Reddit listing and comments modes use no-OAuth public/web sources only; no Reddit user credentials, app credentials, token, or OAuth flow is required.
+
+### V2EX
+
+List V2EX topics, optionally for a node:
+
+```sh
+hfeeds v2ex
+hfeeds v2ex --node programmer
+```
+
+V2EX output is the full current CLI view for this source: topic title, author, reply count, URL, and content where available. There is no separate V2EX detail, discussion, or comments subcommand.
+
 ## Configuration
 
 Language configuration is stored in `$HOME/.hfrc` as JSON:
